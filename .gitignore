@@ -1,0 +1,17 @@
+# build artifacts
+/kenko-nvr
+/bin/
+/dist/
+
+# runtime data
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# local config (ship config.example.yaml instead)
+/config.yaml
+
+# OS / editor
+.DS_Store
+*.swp

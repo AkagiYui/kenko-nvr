@@ -1,0 +1,25 @@
+# Kenko NVR bootstrap configuration.
+#
+# Only infrastructure-level settings live here. Cameras, retention policy,
+# recording rules and S3 upload are configured at runtime from the web UI and
+# stored in the SQLite database.
+
+http:
+  addr: ":8080"        # management UI + REST API + HLS live view
+  username: admin      # web login user
+  password: admin      # CHANGE THIS
+  jwt_secret: ""       # reserved for future use
+
+rtmp:
+  enabled: true        # accept RTMP push from encoders/cameras
+  addr: ":1935"        # encoders publish to rtmp://<host>:1935/live/<cameraID>
+
+rtsp:
+  transport: automatic # default RTSP lower transport: automatic | tcp | udp
+
+storage:
+  recordings_dir: ./data/recordings
+  db_path: ./data/nvr.db
+
+log:
+  level: info          # debug | info | warn | error
