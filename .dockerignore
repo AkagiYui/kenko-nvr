@@ -1,0 +1,15 @@
+# Keep the build context small and reproducible.
+.git
+.github
+data
+*.db
+*.db-wal
+*.db-shm
+/kenko-nvr
+/kenko-nvr-*
+config.yaml
+*.log
+*.tmp
+.DS_Store
+.idea
+.vscode

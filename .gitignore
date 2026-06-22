@@ -1,17 +1,37 @@
-# build artifacts
+# Build artifacts
 /kenko-nvr
+/kenko-nvr-*
 /bin/
 /dist/
+*.exe
 
-# runtime data
+# Go test / profiling output
+*.test
+*.out
+coverage.txt
+*.prof
+
+# Runtime data
 /data/
 *.db
 *.db-wal
 *.db-shm
 
-# local config (ship config.example.yaml instead)
+# Local config (ship config.example.yaml instead)
 /config.yaml
 
-# OS / editor
-.DS_Store
+# Logs / temp
+*.log
+*.tmp
+
+# Editor / IDE
+.idea/
+.vscode/
+*.iml
 *.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
