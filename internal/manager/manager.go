@@ -250,18 +250,27 @@ func (m *Manager) recordingConfig() database.RecordingConfig {
 func (m *Manager) buildPullSource(cam database.Camera) core.Source {
 	switch cam.SourceType {
 	case database.SourceRTSP:
-		transport := cam.Transport
-		if transport == "" && m.cfg.RTSP.Transport != "automatic" {
-			transport = m.cfg.RTSP.Transport
-		}
 		return &rtsp.Source{
 			URL:       cam.URL,
 			Username:  cam.Username,
 			Password:  cam.Password,
-			Transport: transport,
+			Transport: m.rtspTransport(cam),
 			Log:       m.log,
 		}
+	case database.SourceONVIF:
+		// ONVIF resolves the RTSP stream URI dynamically, then pulls over RTSP.
+		return &onvifSource{cam: cam, transport: m.rtspTransport(cam), log: m.log}
 	default:
 		return nil
 	}
+}
+
+func (m *Manager) rtspTransport(cam database.Camera) string {
+	if cam.Transport != "" {
+		return cam.Transport
+	}
+	if m.cfg.RTSP.Transport != "automatic" {
+		return m.cfg.RTSP.Transport
+	}
+	return ""
 }

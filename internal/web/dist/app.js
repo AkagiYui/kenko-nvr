@@ -397,6 +397,7 @@ function cameraForm(cam, onSaved) {
       <div><label>来源类型</label>
         <select data-f="sourceType">
           <option value="rtsp" ${c.sourceType === "rtsp" ? "selected" : ""}>RTSP 拉流</option>
+          <option value="onvif" ${c.sourceType === "onvif" ? "selected" : ""}>ONVIF（自动获取视频流 + 云台）</option>
           <option value="rtmp" ${c.sourceType === "rtmp" ? "selected" : ""}>RTMP 推流（设备推到本机）</option>
         </select>
       </div>
@@ -419,11 +420,14 @@ function cameraForm(cam, onSaved) {
     <div data-rtmp style="display:none">
       <p class="muted small">设备/编码器请推流到：<code>rtmp://&lt;本机IP&gt;:1935/live/${esc(c.id || "<保存后生成的ID>")}</code></p>
     </div>
+    <div data-onvif-note style="display:none">
+      <p class="muted small">视频流地址将通过 ONVIF 自动获取（设备地址与账号在下方填写）。</p>
+    </div>
     <div class="checkbox" style="margin-top:12px"><input type="checkbox" data-f="record" ${c.record ? "checked" : ""} id="rec-cb" /><label for="rec-cb" style="margin:0">启用录像</label></div>
     <div class="checkbox" style="margin-top:8px"><input type="checkbox" data-f="enabled" ${c.enabled ? "checked" : ""} id="en-cb" /><label for="en-cb" style="margin:0">启用此摄像头</label></div>
 
     <hr style="border-color:var(--border);margin:16px 0" />
-    <div class="checkbox"><input type="checkbox" data-f="onvifEnabled" ${c.onvifEnabled ? "checked" : ""} id="onvif-cb" /><label for="onvif-cb" style="margin:0">启用 ONVIF 控制（云台 PTZ）</label></div>
+    <div class="checkbox" data-onvif-toggle><input type="checkbox" data-f="onvifEnabled" ${c.onvifEnabled ? "checked" : ""} id="onvif-cb" /><label for="onvif-cb" style="margin:0">启用 ONVIF 控制（云台 PTZ）</label></div>
     <div data-onvif style="display:${c.onvifEnabled ? "block" : "none"}">
       <label>ONVIF 设备地址 <span class="muted small">host:port</span></label>
       <input data-f="onvifXAddr" value="${esc(c.onvifXAddr || "")}" placeholder="192.168.1.10:80" />
@@ -437,16 +441,26 @@ function cameraForm(cam, onSaved) {
     </div>
   </div>`);
 
+  const onvifCb = $('[data-f="onvifEnabled"]', body);
   const toggle = () => {
     const type = $('[data-f="sourceType"]', body).value;
     $("[data-rtsp]", body).style.display = type === "rtsp" ? "block" : "none";
     $("[data-rtmp]", body).style.display = type === "rtmp" ? "block" : "none";
+    $("[data-onvif-note]", body).style.display = type === "onvif" ? "block" : "none";
+    // For an ONVIF source, control is implied: force-enable and hide the toggle.
+    const toggleRow = $("[data-onvif-toggle]", body);
+    if (type === "onvif") {
+      onvifCb.checked = true;
+      toggleRow.style.display = "none";
+      $("[data-onvif]", body).style.display = "block";
+    } else {
+      toggleRow.style.display = "flex";
+      $("[data-onvif]", body).style.display = onvifCb.checked ? "block" : "none";
+    }
   };
   $('[data-f="sourceType"]', body).onchange = toggle;
   toggle();
-  $('[data-f="onvifEnabled"]', body).onchange = (e) => {
-    $("[data-onvif]", body).style.display = e.target.checked ? "block" : "none";
-  };
+  onvifCb.onchange = toggle;
   $("[data-probe]", body).onclick = () => onvifProbe(body);
 
   const val = (f) => {

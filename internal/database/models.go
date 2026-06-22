@@ -11,6 +11,9 @@ const (
 	// SourceRTMP pulls media from an RTMP URL, or receives an RTMP push whose
 	// stream key equals the camera ID.
 	SourceRTMP SourceType = "rtmp"
+	// SourceONVIF resolves the RTSP stream URI from an ONVIF device at connect
+	// time, then pulls over RTSP. Implies ONVIF control (PTZ) as well.
+	SourceONVIF SourceType = "onvif"
 )
 
 // Camera is a configured media source.

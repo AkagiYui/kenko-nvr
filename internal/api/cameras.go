@@ -131,8 +131,14 @@ func validateCamera(c *database.Camera) error {
 		}
 	case database.SourceRTMP:
 		// URL not needed: the camera publishes to rtmp://host/live/<id>.
+	case database.SourceONVIF:
+		if strings.TrimSpace(c.OnvifXAddr) == "" {
+			return errors.New("onvif device address is required")
+		}
+		// An ONVIF source is also the control endpoint, so PTZ is available.
+		c.OnvifEnabled = true
 	default:
-		return errors.New("sourceType must be 'rtsp' or 'rtmp'")
+		return errors.New("sourceType must be 'rtsp', 'rtmp' or 'onvif'")
 	}
 	return nil
 }
