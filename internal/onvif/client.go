@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	goonvif "github.com/use-go/onvif"
@@ -24,11 +26,14 @@ type Profile = tokenItem
 // Preset is a PTZ preset.
 type Preset = tokenItem
 
-// Connect opens an ONVIF device at xaddr (e.g. "192.168.1.10:80" or a full
-// device-service URL) using the given credentials.
+// Connect opens an ONVIF device at xaddr using the given credentials. The
+// xaddr may be given as a bare host ("192.168.1.10"), a host:port, or a full
+// device-service URL as returned by discovery
+// ("http://192.168.1.10/onvif/device_service") — all are normalised to the
+// host[:port] form the underlying library expects.
 func Connect(xaddr, username, password string) (*Device, error) {
 	dev, err := goonvif.NewDevice(goonvif.DeviceParams{
-		Xaddr:      xaddr,
+		Xaddr:      NormalizeXAddr(xaddr),
 		Username:   username,
 		Password:   password,
 		HttpClient: &http.Client{Timeout: 10 * time.Second},
@@ -37,6 +42,25 @@ func Connect(xaddr, username, password string) (*Device, error) {
 		return nil, fmt.Errorf("connecting to onvif device: %w", err)
 	}
 	return &Device{dev: dev}, nil
+}
+
+// NormalizeXAddr reduces any accepted address form to host[:port], which is
+// what use-go/onvif expects (it builds "http://<xaddr>/onvif/device_service").
+func NormalizeXAddr(xaddr string) string {
+	s := strings.TrimSpace(xaddr)
+	if s == "" {
+		return s
+	}
+	if strings.Contains(s, "://") {
+		if u, err := url.Parse(s); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+	// strip any path component, e.g. "192.168.5.19/onvif/device_service"
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }
 
 func (d *Device) call(method interface{}) ([]byte, error) {

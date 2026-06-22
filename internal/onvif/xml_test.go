@@ -41,6 +41,22 @@ func TestTokenizedElements(t *testing.T) {
 	}
 }
 
+func TestNormalizeXAddr(t *testing.T) {
+	cases := map[string]string{
+		"192.168.5.19":    "192.168.5.19",
+		"192.168.5.19:80": "192.168.5.19:80",
+		"http://192.168.5.19/onvif/device_service":  "192.168.5.19",
+		"http://192.168.5.19:8899/onvif/device_xxx": "192.168.5.19:8899",
+		"192.168.5.19/onvif/device_service":         "192.168.5.19",
+		"  192.168.5.18  ":                          "192.168.5.18",
+	}
+	for in, want := range cases {
+		if got := NormalizeXAddr(in); got != want {
+			t.Errorf("NormalizeXAddr(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestFindText(t *testing.T) {
 	uri := findText([]byte(getStreamURIResponse), "Uri")
 	want := "rtsp://192.168.1.10:554/Streaming/Channels/101"

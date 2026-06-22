@@ -389,8 +389,11 @@ async function viewCameras(view) {
 
 function clear(view) { view.innerHTML = ""; return view; }
 
-function cameraForm(cam, onSaved) {
-  const c = cam || { sourceType: "rtsp", enabled: true, record: false, transport: "", onvifEnabled: false };
+function cameraForm(cam, onSaved, seed) {
+  const c = cam || Object.assign(
+    { sourceType: "rtsp", enabled: true, record: false, transport: "", onvifEnabled: false },
+    seed || {}
+  );
   const body = el(`<div>
     <label>名称</label><input data-f="name" value="${esc(c.name || "")}" />
     <div class="row">
@@ -429,8 +432,8 @@ function cameraForm(cam, onSaved) {
     <hr style="border-color:var(--border);margin:16px 0" />
     <div class="checkbox" data-onvif-toggle><input type="checkbox" data-f="onvifEnabled" ${c.onvifEnabled ? "checked" : ""} id="onvif-cb" /><label for="onvif-cb" style="margin:0">启用 ONVIF 控制（云台 PTZ）</label></div>
     <div data-onvif style="display:${c.onvifEnabled ? "block" : "none"}">
-      <label>ONVIF 设备地址 <span class="muted small">host:port</span></label>
-      <input data-f="onvifXAddr" value="${esc(c.onvifXAddr || "")}" placeholder="192.168.1.10:80" />
+      <label>ONVIF 设备地址 <span class="muted small">填 host 或 host:port（粘贴发现的完整 URL 也可）</span></label>
+      <input data-f="onvifXAddr" value="${esc(c.onvifXAddr || "")}" placeholder="192.168.5.19" />
       <div class="row">
         <div><label>ONVIF 用户名</label><input data-f="onvifUsername" value="${esc(c.onvifUsername || "")}" /></div>
         <div><label>ONVIF 密码</label><input data-f="onvifPassword" type="password" placeholder="${cam ? "（留空表示不修改）" : ""}" /></div>
@@ -510,16 +513,30 @@ async function onvifProbe(formBody) {
 
 async function onvifDiscover() {
   const body = el(`<div><p class="muted">正在局域网内搜索 ONVIF 设备…</p><div data-list></div></div>`);
-  modal({ title: "ONVIF 设备发现", body, okLabel: "关闭", onOk: () => {} });
+  const m = modal({ title: "ONVIF 设备发现", body, okLabel: "关闭", onOk: () => {} });
   try {
     const devices = await api("/onvif/discover");
     const list = $("[data-list]", body);
     list.innerHTML = "";
-    if (!devices.length) { list.appendChild(el(`<p>未发现设备。请确认设备与本机在同一网段。</p>`)); return; }
+    if (!devices || !devices.length) {
+      list.appendChild(el(`<p>未发现设备。请确认设备与本机在同一网段。</p>`));
+      return;
+    }
     for (const d of devices) {
-      list.appendChild(el(`<div class="card" style="margin-bottom:8px"><div class="body small">
-        <div><b>${esc(d.xaddr)}</b></div><div class="muted">${esc(d.types || "")}</div>
-      </div></div>`));
+      let host = d.xaddr;
+      try { host = new URL(d.xaddr).host; } catch (_) {}
+      const row = el(`<div class="card" style="margin-bottom:8px"><div class="body small" style="display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div><b>${esc(host)}</b></div>
+          <div class="muted" style="word-break:break-all">${esc(d.xaddr)}</div>
+        </div>
+        <button class="primary small" data-add>添加为摄像头</button>
+      </div></div>`);
+      $("[data-add]", row).onclick = () => {
+        m.close();
+        cameraForm(null, routeView, { sourceType: "onvif", onvifXAddr: host, name: host });
+      };
+      list.appendChild(row);
     }
   } catch (e) { toast(e.message, "error"); }
 }
