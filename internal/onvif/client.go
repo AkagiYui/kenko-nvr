@@ -74,7 +74,7 @@ func (d *Device) call(method interface{}) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, fmt.Errorf("onvif returned %d", resp.StatusCode)
+		return body, fmt.Errorf("onvif returned %d: %s", resp.StatusCode, faultSummary(body))
 	}
 	return body, nil
 }

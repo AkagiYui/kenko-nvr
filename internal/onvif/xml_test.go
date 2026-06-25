@@ -57,6 +57,36 @@ func TestNormalizeXAddr(t *testing.T) {
 	}
 }
 
+const notAuthorizedFault = `<?xml version="1.0"?>
+<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope" xmlns:ter="http://www.onvif.org/ver10/error">
+ <env:Body>
+  <env:Fault>
+   <env:Code>
+    <env:Value>env:Sender</env:Value>
+    <env:Subcode>
+     <env:Value>ter:NotAuthorized</env:Value>
+    </env:Subcode>
+   </env:Code>
+   <env:Reason>
+    <env:Text xml:lang="en">Sender not authorized</env:Text>
+   </env:Reason>
+  </env:Fault>
+ </env:Body>
+</env:Envelope>`
+
+func TestFaultSummary(t *testing.T) {
+	if got, want := faultSummary([]byte(notAuthorizedFault)), "ter:NotAuthorized: Sender not authorized"; got != want {
+		t.Errorf("faultSummary(fault) = %q, want %q", got, want)
+	}
+	// Non-SOAP body (e.g. a proxy error page) falls back to a one-line snippet.
+	if got, want := faultSummary([]byte("  Bad\n  Request  ")), "Bad Request"; got != want {
+		t.Errorf("faultSummary(plain) = %q, want %q", got, want)
+	}
+	if got, want := faultSummary(nil), "(empty body)"; got != want {
+		t.Errorf("faultSummary(nil) = %q, want %q", got, want)
+	}
+}
+
 func TestFindText(t *testing.T) {
 	uri := findText([]byte(getStreamURIResponse), "Uri")
 	want := "rtsp://192.168.1.10:554/Streaming/Channels/101"

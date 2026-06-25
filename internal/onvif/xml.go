@@ -3,6 +3,7 @@ package onvif
 import (
 	"bytes"
 	"encoding/xml"
+	"strings"
 )
 
 // findText returns the character data of the first element whose local name
@@ -84,4 +85,76 @@ func attr(se xml.StartElement, local string) string {
 		}
 	}
 	return ""
+}
+
+// faultSummary turns an error-response body into a short, human-readable string:
+// the SOAP 1.2 fault subcode and/or reason when present (e.g.
+// "ter:NotAuthorized: Sender not authorized"), otherwise a trimmed one-line
+// snippet of the raw body.
+func faultSummary(data []byte) string {
+	if f := faultString(data); f != "" {
+		return f
+	}
+	s := strings.Join(strings.Fields(string(data)), " ")
+	if s == "" {
+		return "(empty body)"
+	}
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	return s
+}
+
+// faultString extracts the subcode and reason text from a SOAP 1.2 Fault,
+// returning "" if the body is not a recognisable fault. The subcode (the
+// language-independent ter:* code) is the most diagnostic part; the reason is
+// the device's human-readable description.
+func faultString(data []byte) string {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var subcode, reason string
+	inSubcode, inReason := false, false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "Subcode":
+				inSubcode = true
+			case "Reason":
+				inReason = true
+			case "Value":
+				if inSubcode && subcode == "" {
+					var s string
+					if dec.DecodeElement(&s, &t) == nil {
+						subcode = strings.TrimSpace(s)
+					}
+				}
+			case "Text":
+				if inReason && reason == "" {
+					var s string
+					if dec.DecodeElement(&s, &t) == nil {
+						reason = strings.TrimSpace(s)
+					}
+				}
+			}
+		case xml.EndElement:
+			switch t.Name.Local {
+			case "Subcode":
+				inSubcode = false
+			case "Reason":
+				inReason = false
+			}
+		}
+	}
+	switch {
+	case subcode != "" && reason != "":
+		return subcode + ": " + reason
+	case subcode != "":
+		return subcode
+	default:
+		return reason
+	}
 }
