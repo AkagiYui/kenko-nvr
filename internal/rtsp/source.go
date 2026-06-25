@@ -183,13 +183,20 @@ func (s *Source) h264Binder(medi *description.Media, f *format.H264, track *core
 			return
 		}
 		c.OnPacketRTP(medi, f, func(pkt *rtp.Packet) {
-			au, err := dec.Decode(pkt)
-			if err != nil {
-				return // fragmented packet not yet complete, or recoverable error
-			}
+			// Resolve the timestamp first, for every packet. gortsplib's RTP
+			// time decoder only locks onto a track once it sees a packet whose
+			// PTS==DTS (e.g. the start fragment of a keyframe, or a parameter
+			// set). Decoding first and returning early on the incomplete
+			// packets that make up a fragmented keyframe would starve it — it
+			// would only ever see the AU-completing (end) fragment, never
+			// resolve a PTS, and drop every video frame.
 			pts, ok := c.PacketPTS(medi, pkt)
 			if !ok {
 				return
+			}
+			au, err := dec.Decode(pkt)
+			if err != nil {
+				return // fragmented packet not yet complete, or recoverable error
 			}
 			stream.WriteUnit(&core.Unit{
 				TrackID:      track.ID,
@@ -210,13 +217,14 @@ func (s *Source) h265Binder(medi *description.Media, f *format.H265, track *core
 			return
 		}
 		c.OnPacketRTP(medi, f, func(pkt *rtp.Packet) {
-			au, err := dec.Decode(pkt)
-			if err != nil {
-				return
-			}
+			// Resolve the timestamp before decoding — see h264Binder for why.
 			pts, ok := c.PacketPTS(medi, pkt)
 			if !ok {
 				return
+			}
+			au, err := dec.Decode(pkt)
+			if err != nil {
+				return // fragmented packet not yet complete, or recoverable error
 			}
 			stream.WriteUnit(&core.Unit{
 				TrackID:      track.ID,
@@ -237,12 +245,12 @@ func (s *Source) aacBinder(medi *description.Media, f *format.MPEG4Audio, track 
 			return
 		}
 		c.OnPacketRTP(medi, f, func(pkt *rtp.Packet) {
-			aus, err := dec.Decode(pkt)
-			if err != nil {
-				return
-			}
 			pts, ok := c.PacketPTS(medi, pkt)
 			if !ok {
+				return
+			}
+			aus, err := dec.Decode(pkt)
+			if err != nil {
 				return
 			}
 			stream.WriteUnit(&core.Unit{
