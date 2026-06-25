@@ -34,8 +34,13 @@ type Recorder struct {
 	Root       string
 	SegmentDur time.Duration
 	Template   string
-	Sink       Sink
-	Log        *slog.Logger
+	// AlignToClock cuts segments on wall-clock boundaries (e.g. 10-minute
+	// segments start at :00, :10, :20) instead of SegmentDur after the previous
+	// cut. The cut still lands on the next keyframe, since stream copy cannot
+	// split a GOP.
+	AlignToClock bool
+	Sink         Sink
+	Log          *slog.Logger
 
 	// per-track buffering state
 	trackStates map[int]*trackBuf
@@ -46,6 +51,7 @@ type Recorder struct {
 	recordingID  string
 	relPath      string
 	segmentStart time.Time
+	segmentEnd   time.Time // when the current segment should rotate
 }
 
 type sample struct {
@@ -142,7 +148,7 @@ func (r *Recorder) handleVideo(tb *trackBuf, u *core.Unit) error {
 			if err := r.openSegment(u.NTP); err != nil {
 				return err
 			}
-		} else if time.Since(r.segmentStart) >= r.SegmentDur {
+		} else if r.rotateDue(u.NTP) {
 			if err := r.finalize(); err != nil {
 				return err
 			}
@@ -187,7 +193,7 @@ func (r *Recorder) handleAudio(tb *trackBuf, u *core.Unit) error {
 			if err := r.openSegment(u.NTP); err != nil {
 				return err
 			}
-		} else if time.Since(r.segmentStart) >= r.SegmentDur {
+		} else if r.rotateDue(u.NTP) {
 			if err := r.finalize(); err != nil {
 				return err
 			}
@@ -256,6 +262,11 @@ func (r *Recorder) openSegment(start time.Time) error {
 	r.writer = w
 	r.relPath = rel
 	r.segmentStart = start
+	if r.AlignToClock {
+		r.segmentEnd = nextAlignedBoundary(start, r.SegmentDur)
+	} else {
+		r.segmentEnd = start.Add(r.SegmentDur)
+	}
 
 	// reset per-file timeline
 	for _, tb := range r.trackStates {
@@ -273,6 +284,28 @@ func (r *Recorder) openSegment(start time.Time) error {
 		r.Log.Info("recording started", "camera", r.CameraID, "path", rel)
 	}
 	return nil
+}
+
+// rotateDue reports whether the current segment should rotate at time t.
+func (r *Recorder) rotateDue(t time.Time) bool {
+	if r.segmentEnd.IsZero() {
+		return false
+	}
+	return !t.Before(r.segmentEnd)
+}
+
+// nextAlignedBoundary returns the next wall-clock segment boundary strictly
+// after t, aligning to multiples of dur from local midnight — so e.g. 10-minute
+// segments end at :00, :10, :20. A dur that does not divide the day evenly
+// simply restarts the cadence at midnight (the last segment of the day is
+// short), matching FFmpeg's -segment_atclocktime.
+func nextAlignedBoundary(t time.Time, dur time.Duration) time.Time {
+	if dur <= 0 {
+		return t
+	}
+	midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	n := int64(t.Sub(midnight) / dur)
+	return midnight.Add(time.Duration(n+1) * dur)
 }
 
 // finalize flushes any tail samples, closes the file and reports it.

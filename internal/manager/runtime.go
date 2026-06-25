@@ -147,14 +147,39 @@ func (rt *camRuntime) startConsumers(ctx context.Context, stream *core.Stream) {
 
 	if rt.camera.Record {
 		rc := rt.mgr.recordingConfig()
-		rec := &recording.Recorder{
-			CameraID:   rt.camera.ID,
-			CameraName: rt.camera.Name,
-			Root:       rt.mgr.recordingsRoot,
-			SegmentDur: time.Duration(rc.SegmentSeconds) * time.Second,
-			Template:   rc.PathTemplate,
-			Sink:       rt.mgr,
-			Log:        rt.mgr.log,
+		segDur := time.Duration(rc.SegmentSeconds) * time.Second
+
+		var rec interface {
+			Run(context.Context, *core.Stream) error
+		}
+		if rc.Transcode && recording.TranscodeAvailable() {
+			rec = &recording.TranscodeRecorder{
+				CameraID:   rt.camera.ID,
+				CameraName: rt.camera.Name,
+				Root:       rt.mgr.recordingsRoot,
+				SegmentDur: segDur,
+				Template:   rc.PathTemplate,
+				VideoCodec: rc.TranscodeVideoCodec,
+				CRF:        rc.TranscodeCRF,
+				Preset:     rc.TranscodePreset,
+				Sink:       rt.mgr,
+				Log:        rt.mgr.log,
+			}
+		} else {
+			if rc.Transcode && rt.mgr.log != nil {
+				rt.mgr.log.Warn("transcode requested but ffmpeg not found; recording with stream copy",
+					"camera", rt.camera.ID)
+			}
+			rec = &recording.Recorder{
+				CameraID:     rt.camera.ID,
+				CameraName:   rt.camera.Name,
+				Root:         rt.mgr.recordingsRoot,
+				SegmentDur:   segDur,
+				Template:     rc.PathTemplate,
+				AlignToClock: rc.AlignToClock,
+				Sink:         rt.mgr,
+				Log:          rt.mgr.log,
+			}
 		}
 		rt.wg.Add(1)
 		go func() {

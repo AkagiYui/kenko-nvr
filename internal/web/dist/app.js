@@ -845,16 +845,38 @@ async function recordingSettingsCard() {
       <div class="row">
         <div><label>单文件时长（秒）</label><input data-f="segmentSeconds" type="number" value="${c.segmentSeconds}" /></div>
       </div>
-      <label>文件命名规则</label>
+      <div class="checkbox" style="margin-top:8px"><input type="checkbox" data-f="alignToClock" ${c.alignToClock ? "checked" : ""} id="rec-align" /><label for="rec-align" style="margin:0">按整点对齐切片（如 10 分钟分段从 :00 :10 :20 开始）</label></div>
+      <div class="checkbox" style="margin-top:8px"><input type="checkbox" data-f="transcode" ${c.transcode ? "checked" : ""} id="rec-tc" /><label for="rec-tc" style="margin:0">转码录像（需 ffmpeg；可统一为 H.264、精确对齐切片，更耗 CPU）</label></div>
+      <div data-tc style="display:${c.transcode ? "block" : "none"}">
+        <div class="row" style="margin-top:4px">
+          <div><label>视频编码</label>
+            <select data-f="transcodeVideoCodec">
+              <option value="h264" ${c.transcodeVideoCodec !== "hevc" ? "selected" : ""}>H.264（浏览器通用）</option>
+              <option value="hevc" ${c.transcodeVideoCodec === "hevc" ? "selected" : ""}>H.265 / HEVC</option>
+            </select>
+          </div>
+          <div><label>CRF（0-51，越小越好）</label><input data-f="transcodeCRF" type="number" value="${c.transcodeCRF || 23}" /></div>
+          <div><label>编码预设</label><input data-f="transcodePreset" value="${esc(c.transcodePreset || "fast")}" placeholder="fast" /></div>
+        </div>
+      </div>
+      <label style="margin-top:8px">文件命名规则</label>
       <input data-f="pathTemplate" value="${esc(c.pathTemplate)}" />
       <p class="muted small">可用占位符：{camera} {camera_id} {year} {month} {day} {hour} {minute} {second} {unix}</p>
       <button class="primary" data-save style="margin-top:8px">保存</button>
     </div></div>`);
+  $('[data-f="transcode"]', card).onchange = (e) => {
+    $("[data-tc]", card).style.display = e.target.checked ? "block" : "none";
+  };
   $("[data-save]", card).onclick = async () => {
     try {
       await api("/settings/recording", { method: "PUT", body: {
         segmentSeconds: parseInt($('[data-f="segmentSeconds"]', card).value, 10) || 600,
         pathTemplate: $('[data-f="pathTemplate"]', card).value,
+        alignToClock: $('[data-f="alignToClock"]', card).checked,
+        transcode: $('[data-f="transcode"]', card).checked,
+        transcodeVideoCodec: $('[data-f="transcodeVideoCodec"]', card).value,
+        transcodeCRF: parseInt($('[data-f="transcodeCRF"]', card).value, 10) || 23,
+        transcodePreset: $('[data-f="transcodePreset"]', card).value || "fast",
       }});
       toast("已保存（下个录像分段生效）");
     } catch (e) { toast(e.message, "error"); }

@@ -109,13 +109,37 @@ type RecordingConfig struct {
 	// PathTemplate names files using strftime-like tokens and %-placeholders.
 	// See recording/naming.go for the supported tokens.
 	PathTemplate string `json:"pathTemplate"`
+	// AlignToClock cuts segments on wall-clock boundaries (e.g. 10-minute
+	// segments start at :00, :10, :20) rather than SegmentSeconds after the
+	// previous cut.
+	AlignToClock bool `json:"alignToClock"`
+
+	// Transcode re-encodes recordings with FFmpeg instead of copying the source
+	// stream. Requires the `ffmpeg` binary on PATH; falls back to copy if it is
+	// missing. Costs CPU but lets the recording codec be chosen (e.g. H.264 for
+	// universal playback) and gives exact, keyframe-accurate clock-aligned cuts.
+	Transcode bool `json:"transcode"`
+	// TranscodeVideoCodec is the target video codec when Transcode is on:
+	// "h264" (default) or "hevc".
+	TranscodeVideoCodec string `json:"transcodeVideoCodec"`
+	// TranscodeCRF is the libx264/libx265 quality factor (0-51, lower = better;
+	// 23 is a good default).
+	TranscodeCRF int `json:"transcodeCRF"`
+	// TranscodePreset is the libx264/libx265 speed preset
+	// (ultrafast … veryslow).
+	TranscodePreset string `json:"transcodePreset"`
 }
 
-// DefaultRecordingConfig returns sane defaults: 10-minute segments laid out by
-// camera and date.
+// DefaultRecordingConfig returns sane defaults: 10-minute clock-aligned
+// segments laid out by camera and date, stream-copied (no transcode).
 func DefaultRecordingConfig() RecordingConfig {
 	return RecordingConfig{
-		SegmentSeconds: 600,
-		PathTemplate:   "{camera}/{year}-{month}-{day}/{camera}_{year}{month}{day}_{hour}{minute}{second}.mp4",
+		SegmentSeconds:      600,
+		PathTemplate:        "{camera}/{year}-{month}-{day}/{camera}_{year}{month}{day}_{hour}{minute}{second}.mp4",
+		AlignToClock:        true,
+		Transcode:           false,
+		TranscodeVideoCodec: "h264",
+		TranscodeCRF:        23,
+		TranscodePreset:     "fast",
 	}
 }
