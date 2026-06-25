@@ -57,43 +57,242 @@ function logout() {
 }
 
 // ---------------------------------------------------------------------------
-// HLS player management
+// Live player — single-connection fMP4-over-WebSocket into MSE (HLS fallback)
+//
+// A surveillance grid should stream like a real low-latency live site: ONE
+// persistent connection per camera, not a playlist poll plus a flood of little
+// segment requests. The primary path opens a WebSocket to /api/cameras/{id}/mse,
+// receives an fMP4 init segment then one fragment per GOP, and appends them to a
+// MediaSource SourceBuffer — continuous, ~1s latency, no sliding-window re-fetch
+// loop. When MSE or the codec isn't available (e.g. iOS Safari) we fall back to
+// HLS. In every path we muted-autoplay (with a click-to-play overlay if the
+// browser blocks autoplay), which is the fix for the original frozen-frame bug.
 // ---------------------------------------------------------------------------
-const players = new Map(); // videoEl -> Hls instance
+const players = new Map(); // video -> { destroy() }
 
-function startPlayer(video, cameraId) {
+function overlayShow(card, text) {
+  const o = $(".video-overlay", card);
+  if (!o) return;
+  o.onclick = null;
+  o.style.display = "flex";
+  o.textContent = text;
+}
+function overlayHide(card) {
+  const o = $(".video-overlay", card);
+  if (o) { o.style.display = "none"; o.onclick = null; }
+}
+
+// tryPlay performs the muted autoplay; if the browser blocks it (no user
+// gesture yet) we surface a click-to-play affordance rather than a frozen tile.
+function tryPlay(video, card) {
+  const p = video.play();
+  if (p && p.catch) {
+    p.catch(() => {
+      const o = $(".video-overlay", card);
+      if (!o) return;
+      o.style.display = "flex";
+      o.textContent = "▶ 点击播放";
+      o.onclick = () => video.play().then(() => overlayHide(card)).catch(() => {});
+    });
+  }
+}
+
+function startPlayer(video, cameraId, card) {
+  video.muted = true;
+  video.playsInline = true;
+  if (window.MediaSource) startMsePlayer(video, cameraId, card);
+  else startHlsPlayer(video, cameraId, card);
+}
+
+// startMsePlayer streams fMP4 over one WebSocket into a MediaSource.
+//
+// Robustness, in order of importance:
+//  * Buffer cushion: we hold playback until ~START_BUFFER seconds are buffered,
+//    then play that far behind live, so jitter doesn't underrun the decoder.
+//  * Graceful decode recovery: a hardware decode error (MEDIA_ERR_DECODE) kills
+//    the media element but NOT the stream. We cache the init segment and, on
+//    error, rebuild the MediaSource and resume from the next fragment WITHOUT
+//    dropping the WebSocket — a sub-second reseat instead of a full reconnect.
+//    (Fragments are keyframe-aligned, so any one is a valid resume point.)
+//  * A repeated-failure backstop falls back to a full reconnect with backoff.
+function startMsePlayer(video, cameraId, card) {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/api/cameras/${cameraId}/mse?token=${encodeURIComponent(State.token)}`;
+  const START_BUFFER = 2;   // seconds buffered before playback starts
+  const MAX_BUFFER = 30;    // seconds of back-buffer to retain behind playback
+  let ms = null, sb = null, ws = null, queue = [], mime = null, initSeg = null;
+  let stopped = false, started = false, recovering = false, retry = null, delay = 1000;
+  let recoverAt = 0, recoverBurst = 0;
+
+  const closeSocket = () => {
+    if (ws) { try { ws.onclose = ws.onmessage = ws.onerror = null; ws.close(); } catch (_) {} ws = null; }
+  };
+  const fallback = () => { stopped = true; closeSocket(); startHlsPlayer(video, cameraId, card); };
+  const fullReconnect = () => {
+    closeSocket(); sb = null; queue = []; started = false;
+    if (stopped) return;
+    overlayShow(card, "重连中…");
+    retry = setTimeout(connect, delay);
+    delay = Math.min(delay * 2, 8000);
+  };
+
+  const pump = () => {
+    if (!sb || sb.updating || !queue.length) return;
+    try { sb.appendBuffer(queue.shift()); }
+    catch (e) { if (e && e.name === "QuotaExceededError") trim(true); /* else: handled by 'error' */ }
+  };
+  const trim = (hard) => {
+    if (!sb || sb.updating || !sb.buffered.length) return;
+    const start = sb.buffered.start(0);
+    const end = sb.buffered.end(sb.buffered.length - 1);
+    // Trim behind playback, but also cap the total span from the live edge so
+    // the buffer can never balloon if playback hasn't started (e.g. autoplay
+    // was blocked) — otherwise it would grow without bound.
+    let cut = video.currentTime - (hard ? 2 : MAX_BUFFER);
+    cut = Math.max(cut, end - (MAX_BUFFER + 5));
+    if (cut > start + 1) { try { sb.remove(start, cut); } catch (_) {} }
+  };
+  const onUpdateEnd = () => { trim(false); pump(); maybeStart(); };
+
+  // maybeStart begins playback once the cushion is filled, seeking onto the
+  // buffered range first (its timeline can start well above zero after a resume).
+  const maybeStart = () => {
+    if (started || !sb || !sb.buffered.length) return;
+    const begin = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
+    if (end - begin < START_BUFFER) return;
+    if (video.currentTime < begin || video.currentTime > end) {
+      try { video.currentTime = begin; } catch (_) {}
+    }
+    started = true;
+    tryPlay(video, card);
+  };
+
+  // recover rebuilds the MediaSource from the cached init after a decode error,
+  // keeping the WebSocket. If recoveries come in a tight burst the decoder is
+  // genuinely failing, so we drop to a full reconnect instead of spinning.
+  const recover = () => {
+    if (stopped || recovering || !initSeg || !mime) return;
+    const now = Date.now();
+    recoverBurst = now - recoverAt < 2500 ? recoverBurst + 1 : 0;
+    recoverAt = now;
+    if (recoverBurst >= 4) { recoverBurst = 0; fullReconnect(); return; }
+    recovering = true; started = false; sb = null; queue = [];
+    try { if (ms && ms.readyState === "open") ms.endOfStream(); } catch (_) {}
+    ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+    ms.addEventListener("sourceopen", () => {
+      URL.revokeObjectURL(video.src);
+      try {
+        sb = ms.addSourceBuffer(mime);
+        sb.mode = "segments";
+        sb.addEventListener("updateend", onUpdateEnd);
+        queue.push(initSeg);
+        pump();
+      } catch (_) { recovering = false; fullReconnect(); return; }
+      recovering = false;
+    }, { once: true });
+  };
+
+  const connect = () => {
+    if (stopped) return;
+    ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+    ms.addEventListener("sourceopen", () => {
+      URL.revokeObjectURL(video.src);
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === "string") {
+          try { mime = JSON.parse(ev.data).mimeCodec || ""; } catch (_) {}
+          if (!mime || !MediaSource.isTypeSupported(mime)) return fallback();
+          try {
+            sb = ms.addSourceBuffer(mime);
+            sb.mode = "segments";
+            sb.addEventListener("updateend", onUpdateEnd);
+          } catch (_) { return fallback(); }
+          delay = 1000; // connected cleanly
+        } else {
+          const chunk = new Uint8Array(ev.data);
+          if (initSeg === null) initSeg = chunk; // first binary message = init
+          queue.push(chunk);
+          pump();
+        }
+      };
+      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+      ws.onclose = () => fullReconnect();
+    }, { once: true });
+  };
+
+  video.addEventListener("playing", () => overlayHide(card));
+  video.addEventListener("error", () => {
+    if (video.error && video.error.code === 3) recover(); // MEDIA_ERR_DECODE
+    else fullReconnect();
+  });
+  // Keep near the live edge: resume if paused with data, and catch up if we
+  // drift far behind (e.g. after the tab was backgrounded).
+  const keeper = setInterval(() => {
+    if (!sb || !sb.buffered.length || video.seeking) return;
+    const end = sb.buffered.end(sb.buffered.length - 1);
+    if (started && video.readyState >= 2 && video.paused) tryPlay(video, card);
+    if (end - video.currentTime > 8) { try { video.currentTime = end - 1; } catch (_) {} }
+  }, 3000);
+
+  connect();
+  players.set(video, {
+    destroy() {
+      stopped = true;
+      clearInterval(keeper);
+      if (retry) clearTimeout(retry);
+      closeSocket();
+      try { if (ms && ms.readyState === "open") ms.endOfStream(); } catch (_) {}
+      video.removeAttribute("src");
+      if (video.load) video.load();
+    },
+  });
+}
+
+// startHlsPlayer is the fallback: hls.js (or Safari native HLS) against the HLS
+// endpoint. Robust buffering a couple segments behind live; recover on fatal
+// errors only.
+function startHlsPlayer(video, cameraId, card) {
   const url = `/api/cameras/${cameraId}/hls/index.m3u8`;
   if (window.Hls && Hls.isSupported()) {
     const hls = new Hls({
-      lowLatencyMode: true,
+      lowLatencyMode: false,
+      liveSyncDurationCount: 2,
       backBufferLength: 30,
+      maxLiveSyncPlaybackRate: 1.5,
       xhrSetup: (xhr) => {
         if (State.token) xhr.setRequestHeader("Authorization", "Bearer " + State.token);
       },
     });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => tryPlay(video, card));
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (data.fatal) {
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-      }
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { overlayShow(card, "重连中…"); hls.startLoad(); }
+      else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+      else { overlayShow(card, "播放错误：" + (data.details || data.type)); hls.destroy(); }
     });
+    video.addEventListener("playing", () => overlayHide(card));
     hls.loadSource(url);
     hls.attachMedia(video);
-    players.set(video, hls);
-  } else {
-    // Safari native HLS (token via query).
+    players.set(video, { destroy() { try { hls.destroy(); } catch (_) {} } });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = url + "?token=" + encodeURIComponent(State.token);
+    video.addEventListener("loadedmetadata", () => tryPlay(video, card));
+    video.addEventListener("playing", () => overlayHide(card));
+    video.addEventListener("error", () => overlayShow(card, "播放错误"));
+    players.set(video, { destroy() { video.removeAttribute("src"); if (video.load) video.load(); } });
+  } else {
+    overlayShow(card, "此浏览器无法在网页中播放该视频流");
   }
 }
 
 function stopPlayer(video) {
-  const hls = players.get(video);
-  if (hls) {
-    hls.destroy();
-    players.delete(video);
-  }
+  const p = players.get(video);
+  if (p) { p.destroy(); players.delete(video); }
   video.removeAttribute("src");
-  video.load && video.load();
+  if (video.load) video.load();
 }
 
 function stopAllPlayers() {
@@ -243,15 +442,37 @@ async function viewDashboard(view) {
     return;
   }
 
-  for (const cam of cameras) grid.appendChild(liveCard(cam));
-  // periodic status refresh via websocket
+  const tiles = new Map(); // cameraId -> { video, card }
+  for (const cam of cameras) {
+    const card = liveCard(cam);
+    tiles.set(cam.id, { video: $("video", card), card });
+    grid.appendChild(card);
+  }
+  // Live status stream: update the badge and reconcile the player so a tile
+  // recovers on its own when its source reconnects (or stops when it drops).
   subscribeStatus((statuses) => {
     for (const cam of cameras) {
       const st = statuses[cam.id];
+      if (!st) continue;
       const badge = $(`#badge-${cam.id}`);
-      if (badge && st) updateBadge(badge, st);
+      if (badge) updateBadge(badge, st);
+      reconcilePlayer(tiles.get(cam.id), cam, st);
     }
   });
+}
+
+// reconcilePlayer starts or stops a tile's player as the camera goes live or
+// drops, so the grid is self-healing across reconnects.
+function reconcilePlayer(tile, cam, st) {
+  if (!tile) return;
+  const playing = players.has(tile.video);
+  if (st.live && !playing) {
+    overlayShow(tile.card, "加载中…");
+    startPlayer(tile.video, cam.id, tile.card);
+  } else if (!st.live && playing) {
+    stopPlayer(tile.video);
+    overlayShow(tile.card, st.error ? "无信号：" + st.error : "等待视频流…");
+  }
 }
 
 function updateBadge(badge, st) {
@@ -270,20 +491,19 @@ function liveCard(cam) {
       <span class="badge ${esc(st.state || "")}" id="badge-${cam.id}">…</span>
     </div>
     <div class="video-wrap">
-      <video muted playsinline></video>
+      <video muted playsinline autoplay></video>
       <div class="video-overlay" style="display:none"></div>
     </div>
     <div class="body" data-ptz></div>
   </div>`);
   const video = $("video", card);
-  const overlay = $(".video-overlay", card);
   updateBadge($(`#badge-${cam.id}`, card), st);
 
   if (st.live) {
-    startPlayer(video, cam.id);
+    overlayShow(card, "加载中…");
+    startPlayer(video, cam.id, card);
   } else {
-    overlay.style.display = "flex";
-    overlay.textContent = st.error ? "无信号：" + st.error : "等待视频流…";
+    overlayShow(card, st.error ? "无信号：" + st.error : "等待视频流…");
   }
 
   if (cam.onvifEnabled) card.querySelector("[data-ptz]").appendChild(ptzControls(cam));

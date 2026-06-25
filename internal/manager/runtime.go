@@ -228,6 +228,12 @@ func (rt *camRuntime) hlsMuxer() *hls.Muxer {
 	return rt.muxer
 }
 
+func (rt *camRuntime) currentStream() *core.Stream {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.stream
+}
+
 func (rt *camRuntime) status() CameraStatus {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()

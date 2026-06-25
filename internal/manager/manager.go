@@ -157,6 +157,17 @@ func (m *Manager) ServeHLS(id string, w http.ResponseWriter, r *http.Request) {
 	mux.ServeHTTP(w, r)
 }
 
+// StreamFor returns a camera's live core.Stream, or nil if it is not currently
+// connected. Consumers add their own reader; the stream is replaced on each
+// reconnect, so a long-lived consumer should re-fetch when its reader ends.
+func (m *Manager) StreamFor(id string) *core.Stream {
+	rt := m.runtime(id)
+	if rt == nil {
+		return nil
+	}
+	return rt.currentStream()
+}
+
 // --- status -------------------------------------------------------------------
 
 // CameraStatus is the live status of a camera for the UI.

@@ -92,6 +92,7 @@ func (s *Server) router() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.auth.mediaMiddleware)
 			r.Get("/cameras/{id}/hls/*", s.handleHLS)
+			r.Get("/cameras/{id}/mse", s.handleMSE)
 			r.Get("/recordings/{id}/file", s.handleRecordingFile)
 			r.Get("/ws", s.handleWS)
 		})
