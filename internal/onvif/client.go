@@ -11,6 +11,7 @@ import (
 	"time"
 
 	goonvif "github.com/use-go/onvif"
+	"github.com/use-go/onvif/device"
 	"github.com/use-go/onvif/media"
 	xonvif "github.com/use-go/onvif/xsd/onvif"
 )
@@ -117,13 +118,24 @@ type Info struct {
 	Serial       string `json:"serial"`
 }
 
-// GetInfo returns the device's manufacturer/model information.
-func (d *Device) GetInfo() Info {
-	di := d.dev.GetDeviceInfo()
+// GetInfo returns the device's manufacturer/model information. It issues a
+// GetDeviceInformation request and parses the response itself: the use-go/onvif
+// library never populates its cached device info, so dev.GetDeviceInfo() always
+// returns a zero-value struct — we have to ask the device directly.
+func (d *Device) GetInfo() (Info, error) {
+	body, err := d.call(device.GetDeviceInformation{})
+	if err != nil {
+		return Info{}, err
+	}
+	return parseDeviceInfo(body), nil
+}
+
+// parseDeviceInfo extracts the device fields from a GetDeviceInformationResponse.
+func parseDeviceInfo(body []byte) Info {
 	return Info{
-		Manufacturer: di.Manufacturer,
-		Model:        di.Model,
-		Firmware:     di.FirmwareVersion,
-		Serial:       di.SerialNumber,
+		Manufacturer: findText(body, "Manufacturer"),
+		Model:        findText(body, "Model"),
+		Firmware:     findText(body, "FirmwareVersion"),
+		Serial:       findText(body, "SerialNumber"),
 	}
 }

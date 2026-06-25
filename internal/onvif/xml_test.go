@@ -87,6 +87,32 @@ func TestFaultSummary(t *testing.T) {
 	}
 }
 
+const getDeviceInformationResponse = `<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+ <s:Body>
+  <tds:GetDeviceInformationResponse>
+   <tds:Manufacturer>Dahua</tds:Manufacturer>
+   <tds:Model>DH-2H3400-ADP</tds:Model>
+   <tds:FirmwareVersion>2.811.0000013.0.R, Build Date 2023-12-20</tds:FirmwareVersion>
+   <tds:SerialNumber>BA07995PHA29A85</tds:SerialNumber>
+   <tds:HardwareId>1.00</tds:HardwareId>
+  </tds:GetDeviceInformationResponse>
+ </s:Body>
+</s:Envelope>`
+
+func TestParseDeviceInfo(t *testing.T) {
+	got := parseDeviceInfo([]byte(getDeviceInformationResponse))
+	want := Info{
+		Manufacturer: "Dahua",
+		Model:        "DH-2H3400-ADP",
+		Firmware:     "2.811.0000013.0.R, Build Date 2023-12-20",
+		Serial:       "BA07995PHA29A85",
+	}
+	if got != want {
+		t.Errorf("parseDeviceInfo() = %+v, want %+v", got, want)
+	}
+}
+
 func TestFindText(t *testing.T) {
 	uri := findText([]byte(getStreamURIResponse), "Uri")
 	want := "rtsp://192.168.1.10:554/Streaming/Channels/101"

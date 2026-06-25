@@ -133,10 +133,13 @@ func (s *Server) handleOnvifProbe(w http.ResponseWriter, r *http.Request) {
 		Name      string `json:"name"`
 		StreamURI string `json:"streamUri"`
 	}
+	// Device info is best-effort: a camera may restrict GetDeviceInformation
+	// while still serving profiles, which are the essential payload here.
+	info, _ := dev.GetInfo()
 	out := struct {
 		Info     onvif.Info   `json:"info"`
 		Profiles []profileOut `json:"profiles"`
-	}{Info: dev.GetInfo()}
+	}{Info: info}
 
 	for _, p := range profiles {
 		uri, _ := dev.GetStreamURI(p.Token)
