@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/solid-router";
 import { createResource, createSignal, Show, type JSX } from "solid-js";
 import { api } from "~/lib/api";
 import { toast } from "~/components/toast";
-import type { RecordingConfig, RetentionPolicy, S3Config } from "~/lib/types";
+import type { GB28181Info, HAConfig, RecordingConfig, RetentionPolicy, S3Config } from "~/lib/types";
 
 export const Route = createFileRoute("/_authed/settings")({
   component: Settings,
@@ -16,6 +16,8 @@ function Settings() {
         <RecordingCard />
         <RetentionCard />
         <S3Card />
+        <HACard />
+        <GB28181Card />
       </div>
     </>
   );
@@ -186,6 +188,85 @@ function RetentionForm(props: { initial: RetentionPolicy }) {
 }
 
 // ---- S3 ----
+
+// ---- Home Assistant ----
+
+function HACard() {
+  const [data] = createResource<HAConfig>(() => api("/settings/homeassistant"));
+  return <Show when={data()}>{(c) => <HAForm initial={c()} />}</Show>;
+}
+
+function HAForm(props: { initial: HAConfig }) {
+  const c = props.initial;
+  const [enabled, setEnabled] = createSignal(c.enabled);
+  const [discoveryPrefix, setPrefix] = createSignal(c.discoveryPrefix || "homeassistant");
+  const [baseTopic, setBase] = createSignal(c.baseTopic || "kenko-nvr");
+
+  const save = async () => {
+    try {
+      await api("/settings/homeassistant", {
+        method: "PUT",
+        body: { enabled: enabled(), discoveryPrefix: discoveryPrefix(), baseTopic: baseTopic() },
+      });
+      toast("已保存");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+
+  return (
+    <Card title="Home Assistant 集成（MQTT 自动发现）">
+      <p class="text-sm text-base-content/60">
+        通过 MQTT 自动发现把每个摄像头注册为 Home Assistant 设备（移动 binary_sensor + 在线状态）。
+        复用「通知告警」中配置的 MQTT 服务器，请先在通知设置中填写 MQTT Broker。
+      </p>
+      <Check checked={enabled()} onChange={setEnabled} label="启用 Home Assistant 自动发现" />
+      <div class="flex gap-3 flex-wrap">
+        <Labeled label="发现前缀（discovery prefix）" class="flex-1 min-w-[200px]">
+          <input class="input input-bordered w-full" placeholder="homeassistant" value={discoveryPrefix()} onInput={(e) => setPrefix(e.currentTarget.value)} />
+        </Labeled>
+        <Labeled label="状态主题前缀（base topic）" class="flex-1 min-w-[200px]">
+          <input class="input input-bordered w-full" placeholder="kenko-nvr" value={baseTopic()} onInput={(e) => setBase(e.currentTarget.value)} />
+        </Labeled>
+      </div>
+      <div>
+        <button class="btn btn-primary" onClick={() => void save()}>保存</button>
+      </div>
+    </Card>
+  );
+}
+
+// ---- GB28181 (read-only info) ----
+
+function GB28181Card() {
+  const [data] = createResource<GB28181Info>(() => api("/gb28181/info"));
+  return (
+    <Show when={data()}>
+      {(info) => (
+        <Card title="GB28181 国标接入">
+          <Show
+            when={info().enabled}
+            fallback={
+              <p class="text-sm text-base-content/60">
+                未启用。在 <code>config.yaml</code> 中设置 <code>gb28181.enabled: true</code> 并重启后，
+                把设备/NVR 的国标参数指向本服务即可接入。
+              </p>
+            }
+          >
+            <p class="text-sm text-base-content/60">
+              GB28181 SIP 服务已启用。请在设备/NVR 的国标参数中填写以下信息，注册成功后在「摄像头管理」中以「GB28181 国标接入」来源添加：
+            </p>
+            <div class="text-sm space-y-1 mt-1">
+              <div>SIP 服务器编号：<code>{info().serverId}</code></div>
+              <div>SIP 域：<code>{info().domain}</code></div>
+              <div>SIP 服务器地址 / 端口：<code>{info().mediaIp}{info().sipAddr}</code></div>
+            </div>
+          </Show>
+        </Card>
+      )}
+    </Show>
+  );
+}
 
 function S3Card() {
   const [data] = createResource<S3Config>(() => api("/settings/s3"));

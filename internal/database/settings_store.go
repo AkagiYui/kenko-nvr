@@ -12,6 +12,8 @@ const (
 	keyS3            = "s3"
 	keyRecording     = "recording"
 	keyNotifications = "notifications"
+	keyHomeAssistant = "homeassistant"
+	keyVideoWall     = "videowall"
 )
 
 // SettingsStore persists JSON-encoded settings blobs keyed by name.
@@ -90,4 +92,35 @@ func (s *SettingsStore) Notifications() (NotificationConfig, error) {
 // SetNotifications stores the notification config.
 func (s *SettingsStore) SetNotifications(c NotificationConfig) error {
 	return s.setJSON(keyNotifications, c)
+}
+
+// HomeAssistant returns the Home Assistant discovery config, or defaults if unset.
+func (s *SettingsStore) HomeAssistant() (HAConfig, error) {
+	c := DefaultHAConfig()
+	_, err := s.getJSON(keyHomeAssistant, &c)
+	return c, err
+}
+
+// SetHomeAssistant stores the Home Assistant discovery config.
+func (s *SettingsStore) SetHomeAssistant(c HAConfig) error {
+	return s.setJSON(keyHomeAssistant, c)
+}
+
+// VideoWall returns the saved video-wall layouts as an opaque, frontend-defined
+// JSON blob (or an empty default if unset).
+func (s *SettingsStore) VideoWall() (json.RawMessage, error) {
+	var raw json.RawMessage
+	ok, err := s.getJSON(keyVideoWall, &raw)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(raw) == 0 {
+		return json.RawMessage(`{"layouts":[]}`), nil
+	}
+	return raw, nil
+}
+
+// SetVideoWall stores the video-wall layouts blob.
+func (s *SettingsStore) SetVideoWall(raw json.RawMessage) error {
+	return s.setJSON(keyVideoWall, raw)
 }

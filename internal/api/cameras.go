@@ -137,8 +137,12 @@ func validateCamera(c *database.Camera) error {
 		}
 		// An ONVIF source is also the control endpoint, so PTZ is available.
 		c.OnvifEnabled = true
+	case database.SourceGB28181:
+		if strings.TrimSpace(c.GB28181DeviceID) == "" {
+			return errors.New("gb28181 device id is required")
+		}
 	default:
-		return errors.New("sourceType must be 'rtsp', 'rtmp' or 'onvif'")
+		return errors.New("sourceType must be 'rtsp', 'rtmp', 'onvif' or 'gb28181'")
 	}
 	return nil
 }

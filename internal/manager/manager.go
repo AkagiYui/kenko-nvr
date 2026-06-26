@@ -15,6 +15,8 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/core"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/gb28181"
+	"github.com/AkagiYui/kenko-nvr/internal/hadiscovery"
 	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	"github.com/AkagiYui/kenko-nvr/internal/rtmp"
@@ -45,6 +47,13 @@ type Manager struct {
 
 	// notifier delivers motion / offline alerts (nil disables notifications).
 	notifier *notify.Notifier
+
+	// gb is the GB28181 SIP platform, set when GB28181 ingest is enabled. A
+	// gb28181 camera's source invites its channel through this server.
+	gb *gb28181.Server
+
+	// ha publishes Home Assistant MQTT discovery; nil disables it.
+	ha *hadiscovery.Publisher
 }
 
 // SetLiveEncoder sets the encoder used for on-demand live transcoding. Call it
@@ -54,6 +63,53 @@ func (m *Manager) SetLiveEncoder(e *hwaccel.Encoder) { m.liveEncoder = e }
 // SetNotifier sets the notifier used for motion / offline alerts. Call it once
 // at startup, before Start.
 func (m *Manager) SetNotifier(n *notify.Notifier) { m.notifier = n }
+
+// SetGB28181 sets the GB28181 SIP platform used by gb28181 cameras. Call it once
+// at startup, before Start.
+func (m *Manager) SetGB28181(s *gb28181.Server) { m.gb = s }
+
+// GB28181 returns the GB28181 SIP platform, or nil if GB28181 ingest is disabled.
+func (m *Manager) GB28181() *gb28181.Server { return m.gb }
+
+// SetHADiscovery sets the Home Assistant discovery publisher. Call it once at
+// startup, before Start.
+func (m *Manager) SetHADiscovery(p *hadiscovery.Publisher) { m.ha = p }
+
+// HAStates reports the live state of every camera for Home Assistant discovery.
+func (m *Manager) HAStates() map[string]hadiscovery.CamState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]hadiscovery.CamState, len(m.cams))
+	for id, rt := range m.cams {
+		st := rt.status()
+		out[id] = hadiscovery.CamState{Online: st.Live, Motion: st.Motion}
+	}
+	return out
+}
+
+func (m *Manager) haConfigure(cam database.Camera) {
+	if m.ha != nil {
+		m.ha.Configure(cam)
+	}
+}
+
+func (m *Manager) haRemove(id string) {
+	if m.ha != nil {
+		m.ha.Remove(id)
+	}
+}
+
+func (m *Manager) haMotion(id string, on bool) {
+	if m.ha != nil {
+		m.ha.SetMotion(id, on)
+	}
+}
+
+func (m *Manager) haAvailability(id string, online bool) {
+	if m.ha != nil {
+		m.ha.SetAvailability(id, online)
+	}
+}
 
 // New creates a Manager.
 func New(cfg config.Config, db *database.DB, log *slog.Logger) *Manager {
@@ -133,6 +189,7 @@ func (m *Manager) startCamera(cam database.Camera) {
 // ApplyCamera (re)starts or stops a camera after a config change.
 func (m *Manager) ApplyCamera(cam database.Camera) {
 	if cam.Enabled {
+		m.haConfigure(cam)
 		m.startCamera(cam)
 		return
 	}
@@ -150,6 +207,7 @@ func (m *Manager) RemoveCamera(id string) {
 	if ok {
 		rt.stop()
 	}
+	m.haRemove(id)
 }
 
 func (m *Manager) runtime(id string) *camRuntime {
@@ -329,6 +387,15 @@ func (m *Manager) buildPullSource(cam database.Camera) core.Source {
 	case database.SourceONVIF:
 		// ONVIF resolves the RTSP stream URI dynamically, then pulls over RTSP.
 		return &onvifSource{cam: cam, transport: m.rtspTransport(cam), log: m.log}
+	case database.SourceGB28181:
+		if m.gb == nil {
+			return nil
+		}
+		ch := cam.GB28181ChannelID
+		if ch == "" {
+			ch = cam.GB28181DeviceID
+		}
+		return &gb28181.Source{Server: m.gb, DeviceID: cam.GB28181DeviceID, ChannelID: ch}
 	default:
 		return nil
 	}

@@ -22,9 +22,31 @@ type Config struct {
 	RTSP       RTSPConfig       `yaml:"rtsp"`
 	RTSPServer RTSPServerConfig `yaml:"rtsp_server"`
 	WebRTC     WebRTCConfig     `yaml:"webrtc"`
+	GB28181    GB28181Config    `yaml:"gb28181"`
 	Storage    StorageConfig    `yaml:"storage"`
 	Transcode  TranscodeConfig  `yaml:"transcode"`
 	Log        LogConfig        `yaml:"log"`
+}
+
+// GB28181Config configures the embedded GB/T 28181 SIP platform. When enabled,
+// IP cameras / NVRs configured to register to this server appear as devices whose
+// channels can be added as cameras (source type "gb28181").
+type GB28181Config struct {
+	// Enabled turns the SIP server on.
+	Enabled bool `yaml:"enabled"`
+	// SIPAddr is the UDP listen address for SIP signalling (e.g. ":5060").
+	SIPAddr string `yaml:"sip_addr"`
+	// ServerID is the 20-digit platform/server SIP ID devices register to.
+	ServerID string `yaml:"server_id"`
+	// Domain is the SIP domain / realm (typically the first 10 digits of ServerID).
+	Domain string `yaml:"domain"`
+	// Password is the shared device registration password ("" disables auth).
+	Password string `yaml:"password"`
+	// MediaIP is the IP advertised to devices for media; auto-detected if empty.
+	MediaIP string `yaml:"media_ip"`
+	// MediaPortMin/Max bound the UDP ports used to receive RTP/PS media.
+	MediaPortMin int `yaml:"media_port_min"`
+	MediaPortMax int `yaml:"media_port_max"`
 }
 
 // HTTPConfig configures the management/API/HLS web server.
@@ -114,6 +136,15 @@ func Default() Config {
 		},
 		WebRTC: WebRTCConfig{
 			Enabled: true,
+		},
+		GB28181: GB28181Config{
+			Enabled:      false,
+			SIPAddr:      ":5060",
+			ServerID:     "34020000002000000001",
+			Domain:       "3402000000",
+			Password:     "",
+			MediaPortMin: 30000,
+			MediaPortMax: 30500,
 		},
 		Storage: StorageConfig{
 			RecordingsDir: "./data/recordings",

@@ -1,8 +1,15 @@
-import { createSignal, Show } from "solid-js";
+import { createResource, createSignal, For, Show } from "solid-js";
 import { Modal } from "./Modal";
 import { toast } from "./toast";
 import { api } from "~/lib/api";
-import type { Camera, CameraInput, OnvifProbeResult, SourceType } from "~/lib/types";
+import type {
+  Camera,
+  CameraInput,
+  GB28181Device,
+  GB28181Info,
+  OnvifProbeResult,
+  SourceType,
+} from "~/lib/types";
 
 interface Props {
   camera: Camera | null;
@@ -35,6 +42,31 @@ export function CameraForm(props: Props) {
   const [onvifPassword, setOnvifPassword] = createSignal("");
   const [onvifProfile, setOnvifProfile] = createSignal(c?.onvifProfile ?? seed.onvifProfile ?? "");
   const [probing, setProbing] = createSignal(false);
+  const [gbDeviceId, setGbDeviceId] = createSignal(c?.gb28181DeviceId ?? seed.gb28181DeviceId ?? "");
+  const [gbChannelId, setGbChannelId] = createSignal(c?.gb28181ChannelId ?? seed.gb28181ChannelId ?? "");
+
+  const isGB = () => sourceType() === "gb28181";
+  const [gbInfo] = createResource(
+    () => (isGB() ? "info" : null),
+    () => api<GB28181Info>("/gb28181/info"),
+  );
+  const [gbDevices, { refetch: refetchDevices }] = createResource(
+    () => (isGB() ? "devices" : null),
+    () => api<GB28181Device[]>("/gb28181/devices"),
+  );
+  const gbChannels = () => gbDevices()?.find((d) => d.id === gbDeviceId())?.channels ?? [];
+  const refreshGB = async () => {
+    const id = gbDeviceId();
+    if (id) {
+      try {
+        await api(`/gb28181/devices/${id}/refresh`, { method: "POST" });
+      } catch {
+        /* ignore */
+      }
+    }
+    setTimeout(() => void refetchDevices(), 700);
+    void refetchDevices();
+  };
 
   const isOnvifSource = () => sourceType() === "onvif";
   const showOnvifSection = () => isOnvifSource() || onvifEnabled();
@@ -88,6 +120,8 @@ export function CameraForm(props: Props) {
       motionEnabled: motionEnabled() || recordMode() === "motion",
       recordMode: recordMode() as "continuous" | "motion",
       motionSensitivity: motionSensitivity(),
+      gb28181DeviceId: gbDeviceId() || "",
+      gb28181ChannelId: gbChannelId() || "",
     };
     if (c) await api(`/cameras/${c.id}`, { method: "PUT", body: payload });
     else await api("/cameras", { method: "POST", body: payload });
@@ -112,6 +146,7 @@ export function CameraForm(props: Props) {
               <option value="rtsp">RTSP 拉流</option>
               <option value="onvif">ONVIF（自动获取视频流 + 云台）</option>
               <option value="rtmp">RTMP 推流（设备推到本机）</option>
+              <option value="gb28181">GB28181 国标接入</option>
             </select>
           </Field>
           <Field label="RTSP 传输" class="flex-1">
@@ -163,6 +198,74 @@ export function CameraForm(props: Props) {
 
         <Show when={sourceType() === "onvif"}>
           <p class="text-sm text-base-content/60">视频流地址将通过 ONVIF 自动获取（设备地址与账号在下方填写）。</p>
+        </Show>
+
+        <Show when={isGB()}>
+          <div class="space-y-2 rounded-md bg-base-300/40 p-3">
+            <Show
+              when={gbInfo()?.enabled}
+              fallback={
+                <p class="text-sm text-error">
+                  GB28181 服务未启用。请在 config.yaml 中设置 <code>gb28181.enabled: true</code> 并重启。
+                </p>
+              }
+            >
+              <p class="text-xs text-base-content/60 leading-relaxed">
+                在设备/NVR 的国标参数中填写 —— SIP 服务器编号：<code>{gbInfo()?.serverId}</code>，SIP 域：
+                <code>{gbInfo()?.domain}</code>，SIP 服务器地址：
+                <code>{gbInfo()?.mediaIp}{gbInfo()?.sipAddr}</code>。设备注册成功后会出现在下方。
+              </p>
+            </Show>
+
+            <div class="flex gap-2 items-end">
+              <Field label="国标设备" class="flex-1">
+                <select
+                  class="select select-bordered w-full"
+                  value={gbDeviceId()}
+                  onChange={(e) => {
+                    setGbDeviceId(e.currentTarget.value);
+                    setGbChannelId("");
+                  }}
+                >
+                  <option value="">（选择已注册设备）</option>
+                  <For each={gbDevices()}>
+                    {(d) => (
+                      <option value={d.id}>
+                        {(d.name || d.id) + (d.online ? "" : "（离线）")}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </Field>
+              <button class="btn btn-sm btn-ghost" onClick={() => void refreshGB()}>
+                刷新
+              </button>
+            </div>
+
+            <Show when={gbChannels().length > 0}>
+              <Field label="通道" hint="单通道设备可留空（默认用设备本身）">
+                <select
+                  class="select select-bordered w-full"
+                  value={gbChannelId()}
+                  onChange={(e) => setGbChannelId(e.currentTarget.value)}
+                >
+                  <option value="">（设备本身 / 默认通道）</option>
+                  <For each={gbChannels()}>
+                    {(ch) => <option value={ch.id}>{ch.name || ch.id}</option>}
+                  </For>
+                </select>
+              </Field>
+            </Show>
+
+            <Field label="设备编号（手动）" hint="设备未自动出现时，可手动填写 20 位国标编号">
+              <input
+                class="input input-bordered w-full"
+                placeholder="34020000001320000001"
+                value={gbDeviceId()}
+                onInput={(e) => setGbDeviceId(e.currentTarget.value)}
+              />
+            </Field>
+          </div>
         </Show>
 
         <label class="label cursor-pointer justify-start gap-2">

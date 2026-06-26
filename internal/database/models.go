@@ -14,6 +14,10 @@ const (
 	// SourceONVIF resolves the RTSP stream URI from an ONVIF device at connect
 	// time, then pulls over RTSP. Implies ONVIF control (PTZ) as well.
 	SourceONVIF SourceType = "onvif"
+	// SourceGB28181 binds the camera to a channel of a GB/T 28181 device that has
+	// registered to the embedded SIP platform. The stream is obtained by INVITE
+	// (RTP/MPEG-PS) rather than by pulling a URL.
+	SourceGB28181 SourceType = "gb28181"
 )
 
 // Camera is a configured media source.
@@ -43,6 +47,12 @@ type Camera struct {
 	OnvifUsername string `json:"onvifUsername"`
 	OnvifPassword string `json:"onvifPassword"`
 	OnvifProfile  string `json:"onvifProfile"`
+
+	// GB28181 binding (used when SourceType == SourceGB28181). DeviceID is the
+	// registered device's 20-digit national-standard ID; ChannelID is the
+	// channel's ID (defaults to DeviceID for single-channel devices).
+	GB28181DeviceID  string `json:"gb28181DeviceId"`
+	GB28181ChannelID string `json:"gb28181ChannelId"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -189,6 +199,29 @@ func DefaultNotificationConfig() NotificationConfig {
 		Email:              EmailConfig{Port: 587, UseTLS: true},
 		MQTT:               MQTTConfig{Topic: "kenko-nvr/events", ClientID: "kenko-nvr"},
 		WebPush:            WebPushConfig{Subject: "mailto:admin@example.com"},
+	}
+}
+
+// HAConfig configures Home Assistant MQTT discovery. It publishes each camera as
+// an HA device (a motion binary_sensor plus an online/connectivity binary_sensor)
+// to the same MQTT broker configured for notifications. Stored as JSON under the
+// "homeassistant" settings key.
+type HAConfig struct {
+	// Enabled turns Home Assistant discovery on. Requires the notifications MQTT
+	// broker to be configured (the same connection is reused).
+	Enabled bool `json:"enabled"`
+	// DiscoveryPrefix is HA's MQTT discovery prefix (default "homeassistant").
+	DiscoveryPrefix string `json:"discoveryPrefix"`
+	// BaseTopic prefixes the per-camera state topics (default "kenko-nvr").
+	BaseTopic string `json:"baseTopic"`
+}
+
+// DefaultHAConfig returns a disabled default Home Assistant config.
+func DefaultHAConfig() HAConfig {
+	return HAConfig{
+		Enabled:         false,
+		DiscoveryPrefix: "homeassistant",
+		BaseTopic:       "kenko-nvr",
 	}
 }
 

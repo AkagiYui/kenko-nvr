@@ -77,6 +77,9 @@ func (s *Server) router() http.Handler {
 			r.Get("/recordings", s.handleListRecordings)
 			r.Get("/recordings/{id}", s.handleGetRecording)
 			r.Get("/events", s.handleListEvents)
+			r.Get("/settings/videowall", s.handleGetVideoWall)
+			r.Get("/gb28181/info", s.handleGB28181Info)
+			r.Get("/gb28181/devices", s.handleGB28181Devices)
 
 			// Anyone authenticated can register their browser for push.
 			r.Get("/notifications/vapid", s.handleVAPIDPublicKey)
@@ -92,6 +95,8 @@ func (s *Server) router() http.Handler {
 				r.Get("/onvif/discover", s.handleOnvifDiscover)
 				r.Post("/onvif/probe", s.handleOnvifProbe)
 				r.Delete("/recordings/{id}", s.handleDeleteRecording)
+				r.Put("/settings/videowall", s.handleSetVideoWall)
+				r.Post("/gb28181/devices/{deviceId}/refresh", s.handleGB28181Refresh)
 			})
 
 			// Admin only: users and system settings.
@@ -113,6 +118,8 @@ func (s *Server) router() http.Handler {
 				r.Get("/settings/notifications", s.handleGetNotifications)
 				r.Put("/settings/notifications", s.handleSetNotifications)
 				r.Post("/settings/notifications/test", s.handleTestNotification)
+				r.Get("/settings/homeassistant", s.handleGetHA)
+				r.Put("/settings/homeassistant", s.handleSetHA)
 			})
 		})
 

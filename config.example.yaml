@@ -25,6 +25,23 @@ webrtc:
   enabled: true        # low-latency WebRTC live view (WHEP) in the browser
   stun_servers: []     # e.g. ["stun:stun.l.google.com:19302"] for cross-network
 
+gb28181:
+  # Embedded GB/T 28181 SIP platform. When enabled, configure your cameras/NVRs
+  # to register to this server (server_id + domain + the host:port below), then
+  # add their channels as cameras with source type "gb28181" in the web UI.
+  enabled: false
+  sip_addr: ":5060"                    # UDP SIP signalling listen address
+  server_id: "34020000002000000001"    # 20-digit platform/server SIP ID
+  domain: "3402000000"                 # SIP domain / realm
+  password: ""                         # shared device registration password ("" = no auth)
+  media_ip: ""                         # IP advertised to devices for media (auto-detected if empty)
+  media_port_min: 30000                # UDP port range for receiving RTP/MPEG-PS media
+  media_port_max: 30500
+
+# Home Assistant (MQTT discovery) and the video wall are configured at runtime in
+# the web UI (System Settings), not here. HA discovery reuses the notifications
+# MQTT broker.
+
 storage:
   recordings_dir: ./data/recordings
   db_path: ./data/nvr.db

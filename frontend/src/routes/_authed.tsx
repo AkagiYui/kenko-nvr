@@ -19,6 +19,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/dashboard", label: "实时监看", icon: "lucide:monitor-play" },
+  { to: "/videowall", label: "电视墙", icon: "lucide:layout-grid" },
   { to: "/cameras", label: "摄像头管理", icon: "lucide:cctv" },
   { to: "/recordings", label: "录像回放", icon: "lucide:clapperboard" },
   { to: "/notifications", label: "通知告警", icon: "lucide:bell", adminOnly: true },

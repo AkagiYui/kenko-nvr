@@ -81,6 +81,10 @@ var migrations = []string{
 	`ALTER TABLE cameras ADD COLUMN motion_enabled INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE cameras ADD COLUMN record_mode TEXT NOT NULL DEFAULT 'continuous'`,
 	`ALTER TABLE cameras ADD COLUMN motion_sensitivity INTEGER NOT NULL DEFAULT 50`,
+
+	// --- v11: GB28181 device/channel binding --------------------------------
+	`ALTER TABLE cameras ADD COLUMN gb28181_device_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE cameras ADD COLUMN gb28181_channel_id TEXT NOT NULL DEFAULT ''`,
 }
 
 func (d *DB) migrate() error {

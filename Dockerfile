@@ -31,7 +31,9 @@ COPY --from=build /out/kenko-nvr /app/kenko-nvr
 # 8080: web UI / API / HLS / WebRTC signalling   1935: RTMP ingest
 # 8554: RTSP re-publish (external pull). WebRTC media uses ephemeral UDP ports,
 # so run with host networking for cross-container/LAN WebRTC.
-EXPOSE 8080 1935 8554
+# 5060/udp: GB28181 SIP (optional). GB28181 media uses a UDP port range too, so
+# GB28181 ingest likewise wants host networking.
+EXPOSE 8080 1935 8554 5060/udp
 VOLUME ["/app/data"]
 
 ENTRYPOINT ["/app/kenko-nvr", "-config", "/app/config.yaml"]

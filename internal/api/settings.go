@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -112,4 +113,56 @@ func (s *Server) handleSetRecordingCfg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) handleGetHA(w http.ResponseWriter, r *http.Request) {
+	c, err := s.db.Settings.HomeAssistant()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) handleSetHA(w http.ResponseWriter, r *http.Request) {
+	var c database.HAConfig
+	if err := decodeJSON(r, &c); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if c.DiscoveryPrefix == "" {
+		c.DiscoveryPrefix = "homeassistant"
+	}
+	if c.BaseTopic == "" {
+		c.BaseTopic = "kenko-nvr"
+	}
+	if err := s.db.Settings.SetHomeAssistant(c); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) handleGetVideoWall(w http.ResponseWriter, r *http.Request) {
+	raw, err := s.db.Settings.VideoWall()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+func (s *Server) handleSetVideoWall(w http.ResponseWriter, r *http.Request) {
+	var raw json.RawMessage
+	if err := decodeJSON(r, &raw); err != nil || len(raw) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if err := s.db.Settings.SetVideoWall(raw); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

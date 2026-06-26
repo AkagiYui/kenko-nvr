@@ -92,6 +92,7 @@ func (rt *camRuntime) onMotionStart(t time.Time) {
 		Body:       "摄像头「" + rt.camera.Name + "」检测到移动。",
 		Time:       t,
 	})
+	rt.mgr.haMotion(rt.camera.ID, true)
 }
 
 // onMotionEnd closes the current motion event.
@@ -109,6 +110,7 @@ func (rt *camRuntime) onMotionEnd(t time.Time, score float64) {
 	if rt.mgr.log != nil {
 		rt.mgr.log.Debug("motion ended", "camera", rt.camera.ID, "score", score)
 	}
+	rt.mgr.haMotion(rt.camera.ID, false)
 }
 
 func (rt *camRuntime) start(parent context.Context) {
@@ -410,6 +412,7 @@ func (rt *camRuntime) setStream(s *core.Stream) {
 	rt.mu.Lock()
 	rt.stream = s
 	rt.mu.Unlock()
+	rt.mgr.haAvailability(rt.camera.ID, true)
 }
 
 func (rt *camRuntime) clearStream() {
@@ -422,6 +425,7 @@ func (rt *camRuntime) clearStream() {
 	if tc != nil {
 		tc.Close()
 	}
+	rt.mgr.haAvailability(rt.camera.ID, false)
 }
 
 func (rt *camRuntime) setMuxer(mux *hls.Muxer) {

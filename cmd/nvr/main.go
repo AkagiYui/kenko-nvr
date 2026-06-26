@@ -14,6 +14,8 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/api"
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/gb28181"
+	"github.com/AkagiYui/kenko-nvr/internal/hadiscovery"
 	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/logger"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
@@ -78,11 +80,44 @@ func main() {
 	mgr := manager.New(cfg, db, log)
 	mgr.SetLiveEncoder(enc)
 	mgr.SetNotifier(notifier)
+
+	// GB28181 SIP platform (optional): IP cameras / NVRs register here and their
+	// channels can be added as cameras of source type "gb28181".
+	if cfg.GB28181.Enabled {
+		gbSrv := gb28181.New(gb28181.Config{
+			Enabled:      true,
+			SIPAddr:      cfg.GB28181.SIPAddr,
+			ServerID:     cfg.GB28181.ServerID,
+			Domain:       cfg.GB28181.Domain,
+			Password:     cfg.GB28181.Password,
+			MediaIP:      cfg.GB28181.MediaIP,
+			MediaPortMin: cfg.GB28181.MediaPortMin,
+			MediaPortMax: cfg.GB28181.MediaPortMax,
+		}, log)
+		mgr.SetGB28181(gbSrv)
+		go func() {
+			if err := gbSrv.Run(ctx); err != nil {
+				log.Error("gb28181 server stopped", "err", err)
+			}
+		}()
+	}
+
 	if err := mgr.Start(ctx); err != nil {
 		log.Error("failed to start manager", "err", err)
 		os.Exit(1)
 	}
 	defer mgr.Stop()
+
+	// Home Assistant MQTT discovery (optional): publishes each camera as an HA
+	// device (motion binary_sensor + availability) over the configured MQTT broker.
+	haPub := &hadiscovery.Publisher{
+		DB:       db,
+		Notifier: notifier,
+		Status:   mgr,
+		Log:      log,
+	}
+	mgr.SetHADiscovery(haPub)
+	go haPub.Run(ctx)
 
 	// RTSP re-publishing server: external clients pull rtsp://host/<cameraID>.
 	if cfg.RTSPServer.Enabled {

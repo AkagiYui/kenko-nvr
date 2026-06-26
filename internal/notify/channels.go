@@ -194,6 +194,25 @@ func (n *Notifier) publishMQTT(cfg database.MQTTConfig, msg Notification) error 
 	return tok.Error()
 }
 
+// PublishRaw publishes an arbitrary payload to an MQTT topic over the shared
+// (cached) broker connection. It is used by the Home Assistant discovery
+// integration to publish entity configs and state without opening its own
+// connection. retain marks the message retained (used for HA discovery configs).
+func (n *Notifier) PublishRaw(cfg database.MQTTConfig, topic string, payload []byte, retain bool) error {
+	if cfg.BrokerURL == "" {
+		return fmt.Errorf("mqtt broker not set")
+	}
+	client, err := n.mqttClient(cfg)
+	if err != nil {
+		return err
+	}
+	tok := client.Publish(topic, 0, retain, payload)
+	if !tok.WaitTimeout(8 * time.Second) {
+		return fmt.Errorf("mqtt publish timed out")
+	}
+	return tok.Error()
+}
+
 // mqttClient returns a connected client for cfg, rebuilding it if the settings
 // changed since last time.
 func (n *Notifier) mqttClient(cfg database.MQTTConfig) (mqtt.Client, error) {

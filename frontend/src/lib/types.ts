@@ -1,6 +1,6 @@
 // API data shapes, mirroring the Go REST/JSON contract consumed by the UI.
 
-export type SourceType = "rtsp" | "onvif" | "rtmp";
+export type SourceType = "rtsp" | "onvif" | "rtmp" | "gb28181";
 export type CameraState = "running" | "connecting" | "error" | "idle";
 export type Role = "admin" | "operator" | "viewer";
 export type RecordMode = "continuous" | "motion";
@@ -36,6 +36,8 @@ export interface Camera {
   motionEnabled?: boolean;
   recordMode?: RecordMode;
   motionSensitivity?: number;
+  gb28181DeviceId?: string;
+  gb28181ChannelId?: string;
   status?: CameraStatus;
 }
 
@@ -57,6 +59,8 @@ export interface CameraInput {
   motionEnabled: boolean;
   recordMode: RecordMode;
   motionSensitivity: number;
+  gb28181DeviceId: string;
+  gb28181ChannelId: string;
 }
 
 export interface Recording {
@@ -178,4 +182,43 @@ export interface OnvifProfile {
 export interface OnvifProbeResult {
   profiles?: OnvifProfile[];
   info?: { manufacturer?: string; model?: string };
+}
+
+export interface HAConfig {
+  enabled: boolean;
+  discoveryPrefix: string;
+  baseTopic: string;
+}
+
+export interface GB28181Channel {
+  id: string;
+  name?: string;
+  manufacturer?: string;
+  model?: string;
+  status?: string;
+}
+
+export interface GB28181Device {
+  id: string;
+  name?: string;
+  manufacturer?: string;
+  model?: string;
+  online: boolean;
+  lastSeen?: string;
+  channels?: GB28181Channel[];
+}
+
+export interface GB28181Info {
+  enabled: boolean;
+  serverId?: string;
+  domain?: string;
+  sipAddr?: string;
+  mediaIp?: string;
+}
+
+// VideoWallConfig is the saved video-wall layout: a grid size plus, per size, the
+// camera id assigned to each cell (empty string = empty cell).
+export interface VideoWallConfig {
+  gridSize: number;
+  layouts: Record<string, string[]>;
 }

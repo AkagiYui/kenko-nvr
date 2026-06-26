@@ -39,7 +39,8 @@ func timeToMS(t time.Time) int64 {
 // scanCamera helper (they must stay in sync).
 const cameraColumns = `id, name, enabled, source_type, url, username, password,
 	transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
-	onvif_profile, motion_enabled, record_mode, motion_sensitivity, created_at, updated_at`
+	onvif_profile, motion_enabled, record_mode, motion_sensitivity,
+	gb28181_device_id, gb28181_channel_id, created_at, updated_at`
 
 // List returns all cameras ordered by name.
 func (s *CameraStore) List() ([]Camera, error) {
@@ -76,12 +77,13 @@ func (s *CameraStore) Create(c Camera) error {
 	c.CreatedAt, c.UpdatedAt = now, now
 	_, err := s.db.Exec(`INSERT INTO cameras (id, name, enabled, source_type, url, username,
 		password, transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
-		onvif_profile, motion_enabled, record_mode, motion_sensitivity, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		onvif_profile, motion_enabled, record_mode, motion_sensitivity,
+		gb28181_device_id, gb28181_channel_id, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, boolToInt(c.Enabled), string(c.SourceType), c.URL, c.Username, c.Password,
 		c.Transport, boolToInt(c.Record), boolToInt(c.OnvifEnabled), c.OnvifXAddr, c.OnvifUsername,
 		c.OnvifPassword, c.OnvifProfile, boolToInt(c.MotionEnabled), c.RecordMode, c.MotionSensitivity,
-		timeToMS(c.CreatedAt), timeToMS(c.UpdatedAt))
+		c.GB28181DeviceID, c.GB28181ChannelID, timeToMS(c.CreatedAt), timeToMS(c.UpdatedAt))
 	return err
 }
 
@@ -91,11 +93,11 @@ func (s *CameraStore) Update(c Camera) error {
 	res, err := s.db.Exec(`UPDATE cameras SET name=?, enabled=?, source_type=?, url=?, username=?,
 		password=?, transport=?, record=?, onvif_enabled=?, onvif_xaddr=?, onvif_username=?,
 		onvif_password=?, onvif_profile=?, motion_enabled=?, record_mode=?, motion_sensitivity=?,
-		updated_at=? WHERE id=?`,
+		gb28181_device_id=?, gb28181_channel_id=?, updated_at=? WHERE id=?`,
 		c.Name, boolToInt(c.Enabled), string(c.SourceType), c.URL, c.Username, c.Password,
 		c.Transport, boolToInt(c.Record), boolToInt(c.OnvifEnabled), c.OnvifXAddr, c.OnvifUsername,
 		c.OnvifPassword, c.OnvifProfile, boolToInt(c.MotionEnabled), c.RecordMode, c.MotionSensitivity,
-		timeToMS(c.UpdatedAt), c.ID)
+		c.GB28181DeviceID, c.GB28181ChannelID, timeToMS(c.UpdatedAt), c.ID)
 	if err != nil {
 		return err
 	}
@@ -130,7 +132,8 @@ func scanCamera(sc scanner) (Camera, error) {
 	var createdAt, updatedAt int64
 	err := sc.Scan(&c.ID, &c.Name, &enabled, &srcType, &c.URL, &c.Username, &c.Password,
 		&c.Transport, &record, &onvifEnabled, &c.OnvifXAddr, &c.OnvifUsername, &c.OnvifPassword,
-		&c.OnvifProfile, &motionEnabled, &c.RecordMode, &c.MotionSensitivity, &createdAt, &updatedAt)
+		&c.OnvifProfile, &motionEnabled, &c.RecordMode, &c.MotionSensitivity,
+		&c.GB28181DeviceID, &c.GB28181ChannelID, &createdAt, &updatedAt)
 	if err != nil {
 		return Camera{}, err
 	}
