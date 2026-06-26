@@ -36,8 +36,8 @@ jobs:
         working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
+          pnpm build       # also generates src/routeTree.gen.ts (needed by tsc)
           pnpm typecheck
-          pnpm build
 
       - name: Vet
         run: go vet ./...
