@@ -1,7 +1,11 @@
 # Keep the build context small and reproducible.
 .git
 .github
+tmp
 data
+# Frontend deps and build output are produced inside the image, not copied in.
+frontend/node_modules
+internal/web/dist
 *.db
 *.db-wal
 *.db-shm

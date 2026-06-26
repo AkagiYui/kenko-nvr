@@ -1,5 +1,10 @@
-// Package web embeds the built single-page frontend and serves it with an
-// SPA-style fallback to index.html.
+// Package web embeds the built single-page frontend (Vite/SolidJS output) and
+// serves it with an SPA-style fallback to index.html.
+//
+// The frontend lives in ../../frontend and is built into ./dist (see the
+// Makefile / Dockerfile / CI). Asset filenames under dist/assets are
+// content-hashed, so they are served with a long, immutable cache; index.html
+// and the SPA fallback are always revalidated so a deploy is picked up at once.
 package web
 
 import (
@@ -27,18 +32,32 @@ func Handler() http.Handler {
 		if p == "" {
 			p = "index.html"
 		}
+
 		if _, statErr := fs.Stat(sub, p); statErr != nil {
-			// Not a real file: serve index.html (SPA fallback).
-			f, openErr := sub.Open("index.html")
-			if openErr != nil {
-				http.NotFound(w, r)
-				return
-			}
-			defer f.Close()
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.Copy(w, f)
+			// Not a real file: serve index.html (client-side route).
+			serveIndex(w, r, sub)
 			return
+		}
+
+		if strings.HasPrefix(p, "assets/") {
+			// Content-hashed build assets never change under a given name.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			// index.html and other top-level files: revalidate every load.
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+func serveIndex(w http.ResponseWriter, r *http.Request, sub fs.FS) {
+	f, err := sub.Open("index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.Copy(w, f)
 }

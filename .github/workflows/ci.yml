@@ -21,6 +21,24 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      # Build the embedded SolidJS frontend into internal/web/dist before the Go
+      # steps, which embed it via go:embed.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm build
+
       - name: Vet
         run: go vet ./...
       - name: Build

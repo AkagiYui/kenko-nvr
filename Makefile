@@ -7,11 +7,17 @@ PKG    := ./cmd/nvr
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build run test test-race vet fmt clean tidy linux
+.PHONY: all build frontend run test test-race vet fmt clean tidy linux
 
 all: vet test build
 
-build:
+# Build the SolidJS frontend into internal/web/dist (embedded by the Go binary).
+# Requires Node + pnpm (corepack enable). Run this before build/linux to refresh
+# the embedded UI.
+frontend:
+	cd frontend && pnpm install --frozen-lockfile && pnpm build
+
+build: frontend
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 
 run: build
@@ -35,7 +41,7 @@ tidy:
 	go mod tidy
 
 # Cross-compile a fully static Linux amd64 binary.
-linux:
+linux: frontend
 	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BINARY)-linux-amd64 $(PKG)
 
 clean:

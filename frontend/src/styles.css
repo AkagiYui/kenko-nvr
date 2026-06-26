@@ -1,0 +1,51 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* A dark theme tuned to the original hand-rolled palette so the look carries
+   over while the components come from daisyUI. */
+@plugin "daisyui/theme" {
+  name: "kenko";
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #0f1216;
+  --color-base-200: #181c22;
+  --color-base-300: #262d36;
+  --color-base-content: #e6e9ee;
+
+  --color-primary: #2563eb;
+  --color-primary-content: #ffffff;
+  --color-secondary: #20262e;
+  --color-secondary-content: #e6e9ee;
+  --color-accent: #3b82f6;
+  --color-accent-content: #ffffff;
+  --color-neutral: #20262e;
+  --color-neutral-content: #e6e9ee;
+
+  --color-info: #3b82f6;
+  --color-info-content: #ffffff;
+  --color-success: #22c55e;
+  --color-success-content: #04130a;
+  --color-warning: #f59e0b;
+  --color-warning-content: #1a1203;
+  --color-error: #ef4444;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+  --border: 1px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Iconify web component baseline alignment. */
+iconify-icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+}
