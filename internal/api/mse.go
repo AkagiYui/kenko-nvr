@@ -17,11 +17,15 @@ import (
 // server pushes an init segment and then one fragment per GOP as it is produced.
 func (s *Server) handleMSE(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	stream := s.mgr.StreamFor(id)
-	if stream == nil {
+	// LiveStreamFor returns the source stream directly for H.264 cameras, or an
+	// on-demand, viewer-shared H.264 transcode for non-H.264 cameras. release
+	// detaches this viewer (and stops the shared transcode once nobody is left).
+	stream, release, ok := s.mgr.LiveStreamFor(r.Context(), id)
+	if !ok {
 		writeErr(w, http.StatusServiceUnavailable, "camera not live")
 		return
 	}
+	defer release()
 	frag := mse.NewFragmenter(stream.Tracks())
 	initSeg, err := frag.InitSegment()
 	if err != nil {

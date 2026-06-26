@@ -15,6 +15,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/core"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/rtmp"
 	"github.com/AkagiYui/kenko-nvr/internal/rtsp"
 )
@@ -35,7 +36,16 @@ type Manager struct {
 	cams map[string]*camRuntime
 
 	rtmpServer *rtmp.Server
+
+	// liveEncoder is the FFmpeg encoder resolved at startup for transcoding
+	// non-H.264 cameras to a browser-playable live stream. nil if FFmpeg is
+	// absent (such cameras then fall back to their unmodified stream).
+	liveEncoder *hwaccel.Encoder
 }
+
+// SetLiveEncoder sets the encoder used for on-demand live transcoding. Call it
+// once at startup, before Start.
+func (m *Manager) SetLiveEncoder(e *hwaccel.Encoder) { m.liveEncoder = e }
 
 // New creates a Manager.
 func New(cfg config.Config, db *database.DB, log *slog.Logger) *Manager {
@@ -166,6 +176,22 @@ func (m *Manager) StreamFor(id string) *core.Stream {
 		return nil
 	}
 	return rt.currentStream()
+}
+
+// LiveStreamFor returns a browser-playable (H.264) live stream for a camera plus
+// a release callback the caller MUST invoke exactly once when finished.
+//
+// If the source is already H.264 (or has no video) the original stream is
+// returned and release is a no-op. If it is H.265 (etc.) an on-demand,
+// viewer-shared transcode is started; the single FFmpeg process is reused across
+// all concurrent viewers and stops shortly after the last one releases. ok is
+// false only when the camera is not currently live.
+func (m *Manager) LiveStreamFor(ctx context.Context, id string) (stream *core.Stream, release func(), ok bool) {
+	rt := m.runtime(id)
+	if rt == nil {
+		return nil, nil, false
+	}
+	return rt.liveStream(ctx)
 }
 
 // --- status -------------------------------------------------------------------

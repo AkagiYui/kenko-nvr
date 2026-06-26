@@ -9,6 +9,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/database"
 	"github.com/AkagiYui/kenko-nvr/internal/hls"
 	"github.com/AkagiYui/kenko-nvr/internal/recording"
+	"github.com/AkagiYui/kenko-nvr/internal/transcode"
 )
 
 // camRuntime owns the lifecycle of a single camera's media pipeline.
@@ -24,6 +25,12 @@ type camRuntime struct {
 	errMsg string
 	stream *core.Stream
 	muxer  *hls.Muxer
+
+	// liveTC is the on-demand transcoder for browser live view of a non-H.264
+	// source; liveTCStream is the source stream it is bound to (it is rebuilt
+	// when the source stream is replaced on reconnect).
+	liveTC       *transcode.LiveTranscoder
+	liveTCStream *core.Stream
 
 	// pushCtx cancels consumers attached to an RTMP push.
 	pushCancel context.CancelFunc
@@ -53,11 +60,67 @@ func (rt *camRuntime) stop() {
 		rt.cancel()
 	}
 	rt.mu.Lock()
+	tc := rt.liveTC
+	rt.liveTC = nil
+	rt.liveTCStream = nil
 	if rt.stream != nil {
 		rt.stream.Close()
 	}
 	rt.mu.Unlock()
+	if tc != nil {
+		tc.Close()
+	}
 	rt.wg.Wait()
+}
+
+// liveStream returns a browser-playable (H.264) live stream and a release
+// callback. For an H.264 source it hands back the original stream directly; for
+// a non-H.264 source it acquires a viewer on the shared on-demand transcoder,
+// falling back to the original stream if no encoder is available.
+func (rt *camRuntime) liveStream(ctx context.Context) (*core.Stream, func(), bool) {
+	stream := rt.currentStream()
+	if stream == nil {
+		return nil, nil, false
+	}
+
+	// Direct fan-out when the source is already browser-friendly.
+	if v := stream.VideoTrack(); v == nil || v.Codec == core.CodecH264 {
+		return stream, func() {}, true
+	}
+
+	enc := rt.mgr.liveEncoder
+	if enc == nil {
+		// No FFmpeg/encoder: serve the source unchanged (better than a 503; the
+		// browser may still play it, e.g. H.265 in Safari).
+		return stream, func() {}, true
+	}
+
+	rt.mu.Lock()
+	if rt.liveTC == nil || rt.liveTCStream != stream {
+		if rt.liveTC != nil {
+			rt.liveTC.Close()
+		}
+		rt.liveTC = &transcode.LiveTranscoder{
+			Source:  stream,
+			Encoder: enc,
+			Bitrate: rt.mgr.cfg.Transcode.LiveBitrateKbps,
+			GOP:     rt.mgr.cfg.Transcode.LiveGOP,
+			Log:     rt.mgr.log,
+		}
+		rt.liveTCStream = stream
+	}
+	tc := rt.liveTC
+	rt.mu.Unlock()
+
+	out, err := tc.Acquire(ctx)
+	if err != nil {
+		if rt.mgr.log != nil {
+			rt.mgr.log.Warn("live transcode unavailable; serving source stream",
+				"camera", rt.camera.ID, "err", err)
+		}
+		return stream, func() {}, true
+	}
+	return out, tc.Release, true
 }
 
 // supervise runs the pull source in a reconnect loop.
@@ -238,7 +301,13 @@ func (rt *camRuntime) setStream(s *core.Stream) {
 func (rt *camRuntime) clearStream() {
 	rt.mu.Lock()
 	rt.stream = nil
+	tc := rt.liveTC
+	rt.liveTC = nil
+	rt.liveTCStream = nil
 	rt.mu.Unlock()
+	if tc != nil {
+		tc.Close()
+	}
 }
 
 func (rt *camRuntime) setMuxer(mux *hls.Muxer) {

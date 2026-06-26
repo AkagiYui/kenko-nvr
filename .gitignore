@@ -1,3 +1,5 @@
+tmp/
+
 # Build artifacts
 /kenko-nvr
 /kenko-nvr-*

@@ -17,11 +17,12 @@ import (
 
 // Config is the root bootstrap configuration.
 type Config struct {
-	HTTP    HTTPConfig    `yaml:"http"`
-	RTMP    RTMPConfig    `yaml:"rtmp"`
-	RTSP    RTSPConfig    `yaml:"rtsp"`
-	Storage StorageConfig `yaml:"storage"`
-	Log     LogConfig     `yaml:"log"`
+	HTTP      HTTPConfig      `yaml:"http"`
+	RTMP      RTMPConfig      `yaml:"rtmp"`
+	RTSP      RTSPConfig      `yaml:"rtsp"`
+	Storage   StorageConfig   `yaml:"storage"`
+	Transcode TranscodeConfig `yaml:"transcode"`
+	Log       LogConfig       `yaml:"log"`
 }
 
 // HTTPConfig configures the management/API/HLS web server.
@@ -52,6 +53,23 @@ type StorageConfig struct {
 	DBPath        string `yaml:"db_path"`
 }
 
+// TranscodeConfig configures on-demand live transcoding (used to make non-H.264
+// cameras playable in the browser). Recording always archives the original
+// stream untouched; this affects the live view path only.
+type TranscodeConfig struct {
+	// HWAccel selects the FFmpeg encoder for live transcode: "auto" probes the
+	// machine and picks the best *working* hardware encoder (else software);
+	// "none"/"software" forces software libx264; any other value names a specific
+	// encoder (e.g. "h264_videotoolbox", "h264_nvenc", "h264_vaapi"). The encoder
+	// is verified at startup, so a misconfigured name simply falls back.
+	HWAccel string `yaml:"hwaccel"`
+	// LiveBitrateKbps is the target bitrate (kbit/s) for transcoded live video.
+	LiveBitrateKbps int `yaml:"live_bitrate_kbps"`
+	// LiveGOP is the keyframe interval (frames) for transcoded live video; a
+	// shorter interval lowers join latency. At 25 fps, 50 ≈ 2 s.
+	LiveGOP int `yaml:"live_gop"`
+}
+
 // LogConfig configures logging.
 type LogConfig struct {
 	Level string `yaml:"level"`
@@ -75,6 +93,11 @@ func Default() Config {
 		Storage: StorageConfig{
 			RecordingsDir: "./data/recordings",
 			DBPath:        "./data/nvr.db",
+		},
+		Transcode: TranscodeConfig{
+			HWAccel:         "auto",
+			LiveBitrateKbps: 2500,
+			LiveGOP:         50,
 		},
 		Log: LogConfig{
 			Level: "info",

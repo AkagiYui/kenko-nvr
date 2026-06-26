@@ -21,5 +21,18 @@ storage:
   recordings_dir: ./data/recordings
   db_path: ./data/nvr.db
 
+transcode:
+  # On-demand live transcoding makes non-H.264 cameras (e.g. H.265) playable in
+  # the browser. Recording always archives the ORIGINAL stream untouched; this
+  # affects live view only. One shared FFmpeg process serves all viewers of a
+  # camera and runs only while someone is watching.
+  hwaccel: auto              # auto (probe & pick a working HW encoder, else
+                             # software) | none/software | a specific encoder
+                             # name (e.g. h264_videotoolbox, h264_nvenc,
+                             # h264_qsv, h264_vaapi). "auto" needs no tuning:
+                             # the encoder is verified at startup per machine.
+  live_bitrate_kbps: 2500    # target bitrate for transcoded live video
+  live_gop: 50               # keyframe interval in frames (≈2s at 25fps)
+
 log:
   level: info          # debug | info | warn | error

@@ -13,6 +13,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/api"
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/logger"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
 	"github.com/AkagiYui/kenko-nvr/internal/recording"
@@ -54,8 +55,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Discover the live-transcode encoder for this machine (hardware if usable,
+	// else software). This probes FFmpeg once at startup; the deployer configures
+	// nothing beyond an optional override.
+	enc := hwaccel.Detect(ctx, cfg.Transcode.HWAccel, log)
+
 	// Control plane: supervise cameras, ingest and consumers.
 	mgr := manager.New(cfg, db, log)
+	mgr.SetLiveEncoder(enc)
 	if err := mgr.Start(ctx); err != nil {
 		log.Error("failed to start manager", "err", err)
 		os.Exit(1)
