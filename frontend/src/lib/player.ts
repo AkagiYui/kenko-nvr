@@ -58,11 +58,92 @@ function tryPlay(video: HTMLVideoElement, overlay: Overlay): void {
   }
 }
 
-export function startPlayer(video: HTMLVideoElement, cameraId: string, overlay: Overlay): void {
+export type LiveMode = "mse" | "webrtc";
+
+export function startPlayer(
+  video: HTMLVideoElement,
+  cameraId: string,
+  overlay: Overlay,
+  mode: LiveMode = "mse",
+): void {
   video.muted = true;
   video.playsInline = true;
-  if (window.MediaSource) startMsePlayer(video, cameraId, overlay);
-  else startHlsPlayer(video, cameraId, overlay);
+  if (mode === "webrtc" && window.RTCPeerConnection) {
+    startWebrtcPlayer(video, cameraId, overlay);
+  } else if (window.MediaSource) {
+    startMsePlayer(video, cameraId, overlay);
+  } else {
+    startHlsPlayer(video, cameraId, overlay);
+  }
+}
+
+// startWebrtcPlayer negotiates a WHEP session and renders the remote track. It
+// is the lowest-latency path; the server sends H.264 video (no audio over
+// WebRTC in this version).
+function startWebrtcPlayer(video: HTMLVideoElement, cameraId: string, overlay: Overlay): void {
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  let stopped = false;
+  pc.addTransceiver("video", { direction: "recvonly" });
+  pc.ontrack = (ev) => {
+    video.srcObject = ev.streams[0];
+    tryPlay(video, overlay);
+  };
+  pc.onconnectionstatechange = () => {
+    if (["failed", "disconnected", "closed"].includes(pc.connectionState) && !stopped) {
+      overlay.show("WebRTC 连接中断");
+    }
+  };
+
+  void (async () => {
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitIceGathering(pc);
+      const url = `/api/cameras/${cameraId}/webrtc?token=${encodeURIComponent(getToken())}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription?.sdp ?? "",
+      });
+      if (!res.ok) {
+        overlay.show("WebRTC 不可用，回退中…");
+        pc.close();
+        if (!stopped) startMsePlayer(video, cameraId, overlay);
+        return;
+      }
+      const answer = await res.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answer });
+    } catch {
+      pc.close();
+      if (!stopped) startMsePlayer(video, cameraId, overlay);
+    }
+  })();
+
+  players.set(video, {
+    destroy() {
+      stopped = true;
+      try {
+        pc.close();
+      } catch {
+        /* ignore */
+      }
+      video.srcObject = null;
+    },
+  });
+}
+
+function waitIceGathering(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", check);
+        resolve();
+      }
+    };
+    pc.addEventListener("icegatheringstatechange", check);
+    setTimeout(resolve, 2000); // don't wait forever for ICE
+  });
 }
 
 function startMsePlayer(video: HTMLVideoElement, cameraId: string, overlay: Overlay): void {

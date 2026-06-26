@@ -5,12 +5,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/AkagiYui/kenko-nvr/internal/core"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
 	"github.com/AkagiYui/kenko-nvr/internal/hls"
+	"github.com/AkagiYui/kenko-nvr/internal/motion"
+	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	"github.com/AkagiYui/kenko-nvr/internal/recording"
 	"github.com/AkagiYui/kenko-nvr/internal/transcode"
 )
+
+// motionPostRoll keeps motion-mode recording active this long after motion ends
+// (on top of the detector's own end debounce), so the tail of an event is kept.
+const motionPostRoll = 5 * time.Second
 
 // camRuntime owns the lifecycle of a single camera's media pipeline.
 type camRuntime struct {
@@ -34,6 +42,73 @@ type camRuntime struct {
 
 	// pushCtx cancels consumers attached to an RTMP push.
 	pushCancel context.CancelFunc
+
+	// motion detection state, guarded by motionMu.
+	motionMu      sync.Mutex
+	motionActive  bool
+	motionEndAt   time.Time
+	motionEventID string
+}
+
+// motionGate reports whether motion-triggered recording should be active at t:
+// true while motion is active or within the post-roll window after it ended.
+func (rt *camRuntime) motionGate(t time.Time) bool {
+	rt.motionMu.Lock()
+	defer rt.motionMu.Unlock()
+	if rt.motionActive {
+		return true
+	}
+	return !rt.motionEndAt.IsZero() && t.Sub(rt.motionEndAt) < motionPostRoll
+}
+
+func (rt *camRuntime) motionIsActive() bool {
+	rt.motionMu.Lock()
+	defer rt.motionMu.Unlock()
+	return rt.motionActive
+}
+
+// onMotionStart records the start of a motion event and fires a notification.
+func (rt *camRuntime) onMotionStart(t time.Time) {
+	id := uuid.NewString()
+	rt.motionMu.Lock()
+	rt.motionActive = true
+	rt.motionEventID = id
+	rt.motionMu.Unlock()
+
+	_ = rt.mgr.db.Events.Create(database.Event{
+		ID:        id,
+		CameraID:  rt.camera.ID,
+		Type:      database.EventMotion,
+		StartTime: t,
+	})
+	if rt.mgr.log != nil {
+		rt.mgr.log.Info("motion started", "camera", rt.camera.ID)
+	}
+	rt.mgr.notify(notify.Notification{
+		Kind:       "motion",
+		CameraID:   rt.camera.ID,
+		CameraName: rt.camera.Name,
+		Title:      "检测到移动 · " + rt.camera.Name,
+		Body:       "摄像头「" + rt.camera.Name + "」检测到移动。",
+		Time:       t,
+	})
+}
+
+// onMotionEnd closes the current motion event.
+func (rt *camRuntime) onMotionEnd(t time.Time, score float64) {
+	rt.motionMu.Lock()
+	rt.motionActive = false
+	rt.motionEndAt = t
+	id := rt.motionEventID
+	rt.motionEventID = ""
+	rt.motionMu.Unlock()
+
+	if id != "" {
+		_ = rt.mgr.db.Events.Finalize(id, t, score)
+	}
+	if rt.mgr.log != nil {
+		rt.mgr.log.Debug("motion ended", "camera", rt.camera.ID, "score", score)
+	}
 }
 
 func (rt *camRuntime) start(parent context.Context) {
@@ -173,6 +248,16 @@ func (rt *camRuntime) supervise(ctx context.Context) {
 			cancel()
 			if ctx.Err() == nil {
 				rt.setState(core.StateError, errString(err))
+				// The camera was live and just dropped: alert (throttled by the
+				// notifier and gated by the OnCameraOffline setting).
+				rt.mgr.notify(notify.Notification{
+					Kind:       "offline",
+					CameraID:   rt.camera.ID,
+					CameraName: rt.camera.Name,
+					Title:      "摄像头离线 · " + rt.camera.Name,
+					Body:       "摄像头「" + rt.camera.Name + "」连接已断开。",
+					Time:       time.Now(),
+				})
 			}
 
 		case err := <-errCh:
@@ -208,14 +293,39 @@ func (rt *camRuntime) startConsumers(ctx context.Context, stream *core.Stream) {
 		rt.mgr.log.Warn("hls unavailable", "camera", rt.camera.ID, "err", err)
 	}
 
+	// Motion detection: run when explicitly enabled or required by motion-mode
+	// recording, provided FFmpeg is available and there is a video track.
+	motionMode := rt.camera.RecordMode == "motion"
+	if (rt.camera.MotionEnabled || motionMode) && motion.Available() && stream.VideoTrack() != nil {
+		det := &motion.Detector{
+			Source:      stream,
+			Sensitivity: rt.camera.MotionSensitivity,
+			Log:         rt.mgr.log,
+			OnStart:     rt.onMotionStart,
+			OnEnd:       rt.onMotionEnd,
+		}
+		rt.wg.Add(1)
+		go func() {
+			defer rt.wg.Done()
+			_ = det.Run(ctx)
+		}()
+	} else if motionMode && !motion.Available() && rt.mgr.log != nil {
+		rt.mgr.log.Warn("motion record mode requested but ffmpeg not found; recording continuously",
+			"camera", rt.camera.ID)
+	}
+
 	if rt.camera.Record {
 		rc := rt.mgr.recordingConfig()
 		segDur := time.Duration(rc.SegmentSeconds) * time.Second
 
+		// Motion-mode recording requires the gating stream-copy recorder, so it
+		// overrides transcode recording.
+		useGate := motionMode && motion.Available() && stream.VideoTrack() != nil
+
 		var rec interface {
 			Run(context.Context, *core.Stream) error
 		}
-		if rc.Transcode && recording.TranscodeAvailable() {
+		if rc.Transcode && !useGate && recording.TranscodeAvailable() {
 			rec = &recording.TranscodeRecorder{
 				CameraID:   rt.camera.ID,
 				CameraName: rt.camera.Name,
@@ -229,11 +339,11 @@ func (rt *camRuntime) startConsumers(ctx context.Context, stream *core.Stream) {
 				Log:        rt.mgr.log,
 			}
 		} else {
-			if rc.Transcode && rt.mgr.log != nil {
+			if rc.Transcode && !useGate && rt.mgr.log != nil {
 				rt.mgr.log.Warn("transcode requested but ffmpeg not found; recording with stream copy",
 					"camera", rt.camera.ID)
 			}
-			rec = &recording.Recorder{
+			cr := &recording.Recorder{
 				CameraID:     rt.camera.ID,
 				CameraName:   rt.camera.Name,
 				Root:         rt.mgr.recordingsRoot,
@@ -243,6 +353,10 @@ func (rt *camRuntime) startConsumers(ctx context.Context, stream *core.Stream) {
 				Sink:         rt.mgr,
 				Log:          rt.mgr.log,
 			}
+			if useGate {
+				cr.Gate = rt.motionGate
+			}
+			rec = cr
 		}
 		rt.wg.Add(1)
 		go func() {
@@ -337,6 +451,7 @@ func (rt *camRuntime) status() CameraStatus {
 		Error:     rt.errMsg,
 		Live:      rt.stream != nil,
 		Recording: rt.camera.Record && rt.stream != nil,
+		Motion:    rt.motionIsActive(),
 	}
 	if rt.stream != nil {
 		for _, t := range rt.stream.Tracks() {

@@ -15,27 +15,34 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
+	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	webui "github.com/AkagiYui/kenko-nvr/internal/web"
 )
 
 // Server is the HTTP server.
 type Server struct {
-	cfg  config.Config
-	db   *database.DB
-	mgr  *manager.Manager
-	log  *slog.Logger
-	auth *authenticator
-	http *http.Server
+	cfg      config.Config
+	db       *database.DB
+	mgr      *manager.Manager
+	log      *slog.Logger
+	auth     *authenticator
+	notifier *notify.Notifier
+	http     *http.Server
 }
 
 // New creates the API server.
-func New(cfg config.Config, db *database.DB, mgr *manager.Manager, log *slog.Logger) *Server {
+func New(cfg config.Config, db *database.DB, mgr *manager.Manager, notifier *notify.Notifier, log *slog.Logger) *Server {
+	// Seed the first admin from bootstrap config so a fresh install can log in.
+	if err := ensureSeedAdmin(db, cfg.HTTP.Username, cfg.HTTP.Password); err != nil {
+		log.Error("failed to seed admin user", "err", err)
+	}
 	s := &Server{
-		cfg:  cfg,
-		db:   db,
-		mgr:  mgr,
-		log:  log,
-		auth: newAuthenticator(cfg.HTTP.Username, cfg.HTTP.Password),
+		cfg:      cfg,
+		db:       db,
+		mgr:      mgr,
+		log:      log,
+		auth:     newAuthenticator(db.Users),
+		notifier: notifier,
 	}
 	s.http = &http.Server{
 		Addr:              cfg.HTTP.Addr,
@@ -57,33 +64,56 @@ func (s *Server) router() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.auth.middleware)
 
+			// Identity (any authenticated user).
+			r.Get("/me", s.handleMe)
+			r.Post("/logout", s.handleLogout)
+
+			// Read-only views (viewer and up).
 			r.Get("/cameras", s.handleListCameras)
-			r.Post("/cameras", s.handleCreateCamera)
 			r.Get("/cameras/{id}", s.handleGetCamera)
-			r.Put("/cameras/{id}", s.handleUpdateCamera)
-			r.Delete("/cameras/{id}", s.handleDeleteCamera)
 			r.Get("/cameras/{id}/status", s.handleCameraStatus)
 			r.Get("/status", s.handleAllStatus)
-
-			// PTZ / ONVIF
-			r.Post("/cameras/{id}/ptz", s.handlePTZ)
 			r.Get("/cameras/{id}/ptz/presets", s.handlePTZPresets)
-			r.Get("/onvif/discover", s.handleOnvifDiscover)
-			r.Post("/onvif/probe", s.handleOnvifProbe)
-
-			// Recordings
 			r.Get("/recordings", s.handleListRecordings)
 			r.Get("/recordings/{id}", s.handleGetRecording)
-			r.Delete("/recordings/{id}", s.handleDeleteRecording)
+			r.Get("/events", s.handleListEvents)
 
-			// Settings
-			r.Get("/settings/retention", s.handleGetRetention)
-			r.Put("/settings/retention", s.handleSetRetention)
-			r.Get("/settings/s3", s.handleGetS3)
-			r.Put("/settings/s3", s.handleSetS3)
-			r.Post("/settings/s3/test", s.handleTestS3)
-			r.Get("/settings/recording", s.handleGetRecordingCfg)
-			r.Put("/settings/recording", s.handleSetRecordingCfg)
+			// Anyone authenticated can register their browser for push.
+			r.Get("/notifications/vapid", s.handleVAPIDPublicKey)
+			r.Post("/notifications/subscribe", s.handleSubscribePush)
+
+			// Operator and up: manage cameras and control them.
+			r.Group(func(r chi.Router) {
+				r.Use(requireRole(database.RoleOperator))
+				r.Post("/cameras", s.handleCreateCamera)
+				r.Put("/cameras/{id}", s.handleUpdateCamera)
+				r.Delete("/cameras/{id}", s.handleDeleteCamera)
+				r.Post("/cameras/{id}/ptz", s.handlePTZ)
+				r.Get("/onvif/discover", s.handleOnvifDiscover)
+				r.Post("/onvif/probe", s.handleOnvifProbe)
+				r.Delete("/recordings/{id}", s.handleDeleteRecording)
+			})
+
+			// Admin only: users and system settings.
+			r.Group(func(r chi.Router) {
+				r.Use(requireRole(database.RoleAdmin))
+
+				r.Get("/users", s.handleListUsers)
+				r.Post("/users", s.handleCreateUser)
+				r.Put("/users/{id}", s.handleUpdateUser)
+				r.Delete("/users/{id}", s.handleDeleteUser)
+
+				r.Get("/settings/retention", s.handleGetRetention)
+				r.Put("/settings/retention", s.handleSetRetention)
+				r.Get("/settings/s3", s.handleGetS3)
+				r.Put("/settings/s3", s.handleSetS3)
+				r.Post("/settings/s3/test", s.handleTestS3)
+				r.Get("/settings/recording", s.handleGetRecordingCfg)
+				r.Put("/settings/recording", s.handleSetRecordingCfg)
+				r.Get("/settings/notifications", s.handleGetNotifications)
+				r.Put("/settings/notifications", s.handleSetNotifications)
+				r.Post("/settings/notifications/test", s.handleTestNotification)
+			})
 		})
 
 		// Media + WebSocket endpoints: authenticated, but tokens may arrive via
@@ -93,6 +123,11 @@ func (s *Server) router() http.Handler {
 			r.Use(s.auth.mediaMiddleware)
 			r.Get("/cameras/{id}/hls/*", s.handleHLS)
 			r.Get("/cameras/{id}/mse", s.handleMSE)
+			r.Get("/cameras/{id}/flv", s.handleFLV)
+			r.Get("/cameras/{id}/flv.ws", s.handleFLVWS)
+			r.Get("/cameras/{id}/ts", s.handleTS)
+			r.Post("/cameras/{id}/webrtc", s.handleWebRTC)
+			r.Get("/cameras/{id}/talk", s.handleTalk)
 			r.Get("/recordings/{id}/file", s.handleRecordingFile)
 			r.Get("/ws", s.handleWS)
 		})

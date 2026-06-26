@@ -17,6 +17,14 @@ rtmp:
 rtsp:
   transport: automatic # default RTSP lower transport: automatic | tcp | udp
 
+rtsp_server:
+  enabled: true        # re-publish live cameras over RTSP for external pull
+  addr: ":8554"        # clients pull rtsp://<host>:8554/<cameraID>
+
+webrtc:
+  enabled: true        # low-latency WebRTC live view (WHEP) in the browser
+  stun_servers: []     # e.g. ["stun:stun.l.google.com:19302"] for cross-network
+
 storage:
   recordings_dir: ./data/recordings
   db_path: ./data/nvr.db

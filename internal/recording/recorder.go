@@ -39,8 +39,13 @@ type Recorder struct {
 	// cut. The cut still lands on the next keyframe, since stream copy cannot
 	// split a GOP.
 	AlignToClock bool
-	Sink         Sink
-	Log          *slog.Logger
+	// Gate, when non-nil, decides at each keyframe whether recording should be
+	// active right now. It powers event-triggered (motion) recording: while it
+	// returns false no segment is written, and an open segment is closed. When
+	// nil the recorder always records (continuous mode).
+	Gate func(t time.Time) bool
+	Sink Sink
+	Log  *slog.Logger
 
 	// per-track buffering state
 	trackStates map[int]*trackBuf
@@ -138,24 +143,47 @@ func (r *Recorder) handleVideo(tb *trackBuf, u *core.Unit) error {
 	}
 
 	if u.RandomAccess {
-		// Close out the previous GOP into the current file, then rotate if due.
+		active := r.Gate == nil || r.Gate(u.NTP)
+
+		// Close out the previous GOP into the current file (if one is open), or
+		// discard it when recording is gated off, so buffers never grow unbounded.
 		if len(tb.pending) > 0 {
-			if err := r.flush(dts); err != nil {
-				return err
+			if r.writer != nil {
+				if err := r.flush(dts); err != nil {
+					return err
+				}
+			} else {
+				r.clearPending()
 			}
 		}
-		if r.writer == nil {
+
+		switch {
+		case active && r.writer == nil:
 			if err := r.openSegment(u.NTP); err != nil {
 				return err
 			}
-		} else if r.rotateDue(u.NTP) {
+		case active && r.rotateDue(u.NTP):
 			if err := r.finalize(); err != nil {
 				return err
 			}
 			if err := r.openSegment(u.NTP); err != nil {
 				return err
 			}
+		case !active && r.writer != nil:
+			// Motion ended: close the current segment and wait for the next event.
+			if err := r.finalize(); err != nil {
+				return err
+			}
 		}
+
+		// While gated off there is no file to write into; drop this keyframe's
+		// access unit rather than buffering it.
+		if !active {
+			return nil
+		}
+	} else if r.writer == nil {
+		// Gated off (or before the first keyframe): don't buffer inter frames.
+		return nil
 	}
 
 	payload, err := videoAVCC(tb.track.Codec, u.AUs)
@@ -246,6 +274,14 @@ func (r *Recorder) flush(videoBoundaryDTS int64) error {
 		tb.pending = tb.pending[:0]
 	}
 	return r.writer.writeFragment(partTracks)
+}
+
+// clearPending drops buffered samples on every track without writing them, used
+// when recording is gated off (motion mode) so memory stays bounded.
+func (r *Recorder) clearPending() {
+	for _, tb := range r.trackStates {
+		tb.pending = tb.pending[:0]
+	}
 }
 
 func (r *Recorder) openSegment(start time.Time) error {

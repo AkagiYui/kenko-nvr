@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"flag"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,7 +17,9 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/logger"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
+	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	"github.com/AkagiYui/kenko-nvr/internal/recording"
+	"github.com/AkagiYui/kenko-nvr/internal/rtspserver"
 	"github.com/AkagiYui/kenko-nvr/internal/storage"
 )
 
@@ -60,14 +63,39 @@ func main() {
 	// nothing beyond an optional override.
 	enc := hwaccel.Detect(ctx, cfg.Transcode.HWAccel, log)
 
+	// Notifier delivers motion / offline alerts to the configured channels.
+	notifier := &notify.Notifier{
+		ConfigFn: func() database.NotificationConfig {
+			c, _ := db.Settings.Notifications()
+			return c
+		},
+		Push: db.Push,
+		Log:  log,
+	}
+	defer notifier.Close()
+
 	// Control plane: supervise cameras, ingest and consumers.
 	mgr := manager.New(cfg, db, log)
 	mgr.SetLiveEncoder(enc)
+	mgr.SetNotifier(notifier)
 	if err := mgr.Start(ctx); err != nil {
 		log.Error("failed to start manager", "err", err)
 		os.Exit(1)
 	}
 	defer mgr.Stop()
+
+	// RTSP re-publishing server: external clients pull rtsp://host/<cameraID>.
+	if cfg.RTSPServer.Enabled {
+		rtspSrv := &rtspserver.Server{Addr: cfg.RTSPServer.Addr, Provider: mgr, Log: log}
+		go func() {
+			if err := rtspSrv.Run(ctx); err != nil {
+				log.Error("rtsp server stopped", "err", err)
+			}
+		}()
+	}
+
+	// Periodically prune old motion events (mirror the recordings age limit).
+	go runEventCleanup(ctx, db, log)
 
 	// Retention worker (rolling deletion / storage thresholds).
 	ret := &recording.Retention{
@@ -94,7 +122,7 @@ func main() {
 	go uploader.Run(ctx, 30*time.Second)
 
 	// Management/API/HLS server (blocks until shutdown).
-	srv := api.New(cfg, db, mgr, log)
+	srv := api.New(cfg, db, mgr, notifier, log)
 	log.Info("kenko-nvr started",
 		"http", cfg.HTTP.Addr,
 		"rtmp", cfg.RTMP.Addr,
@@ -105,4 +133,30 @@ func main() {
 	}
 
 	log.Info("shutting down")
+}
+
+// runEventCleanup periodically deletes motion events older than the recordings
+// retention age (default 30 days), so the events table does not grow unbounded.
+func runEventCleanup(ctx context.Context, db *database.DB, log *slog.Logger) {
+	clean := func() {
+		days := 30
+		if p, err := db.Settings.Retention(); err == nil && p.MaxAgeDays > 0 {
+			days = p.MaxAgeDays
+		}
+		cutoff := time.Now().AddDate(0, 0, -days)
+		if n, err := db.Events.DeleteOlderThan(cutoff); err == nil && n > 0 {
+			log.Info("pruned old events", "count", n)
+		}
+	}
+	clean()
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			clean()
+		}
+	}
 }

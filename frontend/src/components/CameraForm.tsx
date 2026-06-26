@@ -26,6 +26,9 @@ export function CameraForm(props: Props) {
   const [password, setPassword] = createSignal("");
   const [record, setRecord] = createSignal(c?.record ?? seed.record ?? false);
   const [enabled, setEnabled] = createSignal(c?.enabled ?? seed.enabled ?? true);
+  const [motionEnabled, setMotionEnabled] = createSignal(c?.motionEnabled ?? seed.motionEnabled ?? false);
+  const [recordMode, setRecordMode] = createSignal<string>(c?.recordMode ?? seed.recordMode ?? "continuous");
+  const [motionSensitivity, setMotionSensitivity] = createSignal(c?.motionSensitivity ?? seed.motionSensitivity ?? 50);
   const [onvifEnabled, setOnvifEnabled] = createSignal(c?.onvifEnabled ?? seed.onvifEnabled ?? false);
   const [onvifXAddr, setOnvifXAddr] = createSignal(c?.onvifXAddr ?? seed.onvifXAddr ?? "");
   const [onvifUsername, setOnvifUsername] = createSignal(c?.onvifUsername ?? seed.onvifUsername ?? "");
@@ -82,6 +85,9 @@ export function CameraForm(props: Props) {
       onvifUsername: onvifUsername() || "",
       onvifPassword: onvifPassword() || "",
       onvifProfile: onvifProfile() || "",
+      motionEnabled: motionEnabled() || recordMode() === "motion",
+      recordMode: recordMode() as "continuous" | "motion",
+      motionSensitivity: motionSensitivity(),
     };
     if (c) await api(`/cameras/${c.id}`, { method: "PUT", body: payload });
     else await api("/cameras", { method: "POST", body: payload });
@@ -167,6 +173,42 @@ export function CameraForm(props: Props) {
           <input type="checkbox" class="checkbox checkbox-sm" checked={enabled()} onChange={(e) => setEnabled(e.currentTarget.checked)} />
           <span class="label-text">启用此摄像头</span>
         </label>
+
+        <div class="divider my-1">移动侦测</div>
+
+        <label class="label cursor-pointer justify-start gap-2">
+          <input
+            type="checkbox"
+            class="checkbox checkbox-sm"
+            checked={motionEnabled()}
+            onChange={(e) => setMotionEnabled(e.currentTarget.checked)}
+          />
+          <span class="label-text">启用移动侦测（需 ffmpeg；产生事件并可触发告警）</span>
+        </label>
+
+        <Field label="录像模式" hint="事件触发仅在检测到移动时录像">
+          <select
+            class="select select-bordered w-full"
+            value={recordMode()}
+            onChange={(e) => setRecordMode(e.currentTarget.value)}
+          >
+            <option value="continuous">持续录像</option>
+            <option value="motion">移动事件触发录像</option>
+          </select>
+        </Field>
+
+        <Show when={motionEnabled() || recordMode() === "motion"}>
+          <Field label={`灵敏度：${motionSensitivity()}（越高越灵敏）`}>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              class="range range-sm"
+              value={motionSensitivity()}
+              onInput={(e) => setMotionSensitivity(parseInt(e.currentTarget.value, 10))}
+            />
+          </Field>
+        </Show>
 
         <div class="divider my-1" />
 

@@ -8,9 +8,10 @@ import (
 
 // Settings keys.
 const (
-	keyRetention = "retention"
-	keyS3        = "s3"
-	keyRecording = "recording"
+	keyRetention     = "retention"
+	keyS3            = "s3"
+	keyRecording     = "recording"
+	keyNotifications = "notifications"
 )
 
 // SettingsStore persists JSON-encoded settings blobs keyed by name.
@@ -77,4 +78,16 @@ func (s *SettingsStore) Recording() (RecordingConfig, error) {
 // SetRecording stores the recording config.
 func (s *SettingsStore) SetRecording(c RecordingConfig) error {
 	return s.setJSON(keyRecording, c)
+}
+
+// Notifications returns the notification config, or defaults if unset.
+func (s *SettingsStore) Notifications() (NotificationConfig, error) {
+	c := DefaultNotificationConfig()
+	_, err := s.getJSON(keyNotifications, &c)
+	return c, err
+}
+
+// SetNotifications stores the notification config.
+func (s *SettingsStore) SetNotifications(c NotificationConfig) error {
+	return s.setJSON(keyNotifications, c)
 }

@@ -28,6 +28,15 @@ type Camera struct {
 	Transport  string     `json:"transport"` // rtsp transport override: "", "tcp", "udp"
 	Record     bool       `json:"record"`
 
+	// Motion detection / event-triggered recording.
+	MotionEnabled bool `json:"motionEnabled"`
+	// RecordMode is "continuous" (record whenever live, the default) or "motion"
+	// (only record while motion is detected, plus a short post-roll). "motion"
+	// implies MotionEnabled.
+	RecordMode string `json:"recordMode"`
+	// MotionSensitivity is 0–100; higher detects smaller/subtler movement.
+	MotionSensitivity int `json:"motionSensitivity"`
+
 	// ONVIF control (optional, independent of the media source).
 	OnvifEnabled  bool   `json:"onvifEnabled"`
 	OnvifXAddr    string `json:"onvifXAddr"`
@@ -52,6 +61,135 @@ type Recording struct {
 	Uploaded   bool      `json:"uploaded"`
 	S3Key      string    `json:"s3Key"`
 	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// Role enumerates a user's permission level.
+type Role string
+
+const (
+	// RoleAdmin can do everything, including managing users and settings.
+	RoleAdmin Role = "admin"
+	// RoleOperator can manage cameras and control PTZ/talk, but not users or
+	// system settings.
+	RoleOperator Role = "operator"
+	// RoleViewer can only view live/recordings.
+	RoleViewer Role = "viewer"
+)
+
+// ValidRole reports whether r is a known role.
+func ValidRole(r Role) bool {
+	switch r {
+	case RoleAdmin, RoleOperator, RoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// User is a login account.
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"` // never serialized
+	Role         Role      `json:"role"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// EventType enumerates the kinds of detected events.
+type EventType string
+
+const (
+	// EventMotion is a motion-detection event.
+	EventMotion EventType = "motion"
+)
+
+// Event is a detected occurrence (currently motion) on a camera, used by the
+// timeline UI and notifications.
+type Event struct {
+	ID        string    `json:"id"`
+	CameraID  string    `json:"cameraId"`
+	Type      EventType `json:"type"`
+	StartTime time.Time `json:"startTime"`
+	EndTime   time.Time `json:"endTime"`
+	Score     float64   `json:"score"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// PushSubscription is a stored Web Push (browser) subscription.
+type PushSubscription struct {
+	ID        string    `json:"id"`
+	Endpoint  string    `json:"endpoint"`
+	P256dh    string    `json:"p256dh"`
+	Auth      string    `json:"auth"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// NotificationConfig controls alert delivery. Stored as JSON under the
+// "notifications" settings key.
+type NotificationConfig struct {
+	Enabled bool `json:"enabled"`
+	// OnMotion fires a notification when motion starts on a camera.
+	OnMotion bool `json:"onMotion"`
+	// OnCameraOffline fires when a camera transitions to the error/offline state.
+	OnCameraOffline bool `json:"onCameraOffline"`
+	// MinIntervalSeconds throttles repeat notifications per camera+kind.
+	MinIntervalSeconds int `json:"minIntervalSeconds"`
+
+	Email   EmailConfig   `json:"email"`
+	Webhook WebhookConfig `json:"webhook"`
+	MQTT    MQTTConfig    `json:"mqtt"`
+	WebPush WebPushConfig `json:"webPush"`
+}
+
+// EmailConfig configures SMTP email alerts.
+type EmailConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	To       string `json:"to"` // comma-separated recipients
+	UseTLS   bool   `json:"useTLS"`
+}
+
+// WebhookConfig configures an HTTP webhook alert.
+type WebhookConfig struct {
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url"`
+}
+
+// MQTTConfig configures publishing alerts to an MQTT broker.
+type MQTTConfig struct {
+	Enabled  bool   `json:"enabled"`
+	BrokerURL string `json:"brokerURL"` // e.g. tcp://broker:1883
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Topic    string `json:"topic"` // e.g. kenko-nvr/events
+	ClientID string `json:"clientID"`
+}
+
+// WebPushConfig configures browser Web Push (VAPID). The keypair is generated
+// once and stored here so subscriptions remain valid across restarts.
+type WebPushConfig struct {
+	Enabled    bool   `json:"enabled"`
+	Subject    string `json:"subject"`    // mailto: or https URL
+	PublicKey  string `json:"publicKey"`  // base64url VAPID public key (sent to the browser)
+	PrivateKey string `json:"privateKey"` // base64url VAPID private key (server-only)
+}
+
+// DefaultNotificationConfig returns a disabled default notification config.
+func DefaultNotificationConfig() NotificationConfig {
+	return NotificationConfig{
+		Enabled:            false,
+		OnMotion:           true,
+		OnCameraOffline:    true,
+		MinIntervalSeconds: 60,
+		Email:              EmailConfig{Port: 587, UseTLS: true},
+		MQTT:               MQTTConfig{Topic: "kenko-nvr/events", ClientID: "kenko-nvr"},
+		WebPush:            WebPushConfig{Subject: "mailto:admin@example.com"},
+	}
 }
 
 // RetentionPolicy controls rolling deletion of recordings. Stored as JSON under

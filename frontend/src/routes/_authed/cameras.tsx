@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/solid-router";
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
-import { api } from "~/lib/api";
+import { api, atLeastOperator } from "~/lib/api";
 import { toast } from "~/components/toast";
 import { CameraForm } from "~/components/CameraForm";
 import { OnvifDiscover } from "~/components/OnvifDiscover";
@@ -40,12 +40,14 @@ function Cameras() {
       <div class="flex items-center gap-2.5 mb-4 flex-wrap">
         <h1 class="text-[22px] font-semibold m-0">摄像头管理</h1>
         <div class="flex-1" />
-        <button class="btn btn-ghost btn-sm" onClick={() => setDiscoverOpen(true)}>
-          ONVIF 发现
-        </button>
-        <button class="btn btn-primary btn-sm" onClick={() => setForm({ camera: null })}>
-          + 添加摄像头
-        </button>
+        <Show when={atLeastOperator()}>
+          <button class="btn btn-ghost btn-sm" onClick={() => setDiscoverOpen(true)}>
+            ONVIF 发现
+          </button>
+          <button class="btn btn-primary btn-sm" onClick={() => setForm({ camera: null })}>
+            + 添加摄像头
+          </button>
+        </Show>
       </div>
 
       <div class="card bg-base-200 border border-base-300 overflow-x-auto">
@@ -86,12 +88,14 @@ function Cameras() {
                     <td>{cam.record ? "✓" : "—"}</td>
                     <td>{cam.onvifEnabled ? "✓" : "—"}</td>
                     <td class="text-right whitespace-nowrap">
-                      <button class="btn btn-ghost btn-xs" onClick={() => setForm({ camera: cam })}>
-                        编辑
-                      </button>
-                      <button class="btn btn-error btn-outline btn-xs ml-1" onClick={() => void del(cam)}>
-                        删除
-                      </button>
+                      <Show when={atLeastOperator()} fallback={<span class="text-base-content/30">—</span>}>
+                        <button class="btn btn-ghost btn-xs" onClick={() => setForm({ camera: cam })}>
+                          编辑
+                        </button>
+                        <button class="btn btn-error btn-outline btn-xs ml-1" onClick={() => void del(cam)}>
+                          删除
+                        </button>
+                      </Show>
                     </td>
                   </tr>
                 )}

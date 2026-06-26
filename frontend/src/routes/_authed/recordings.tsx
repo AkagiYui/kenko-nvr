@@ -3,21 +3,48 @@ import { createEffect, createMemo, createResource, createSignal, For, Show } fro
 import { api, getToken } from "~/lib/api";
 import { toast } from "~/components/toast";
 import { Modal } from "~/components/Modal";
+import { Timeline } from "~/components/Timeline";
 import { fmtDur, fmtSize, fmtTime } from "~/lib/format";
-import type { Camera, Recording } from "~/lib/types";
+import type { Camera, NvrEvent, Recording } from "~/lib/types";
 
 export const Route = createFileRoute("/_authed/recordings")({
   component: Recordings,
 });
 
+function todayStr(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+interface Playing {
+  rec: Recording;
+  offset: number;
+}
+
 function Recordings() {
   const [cameras] = createResource<Camera[]>(() => api("/cameras"));
   const [camId, setCamId] = createSignal("");
+  const [day, setDay] = createSignal(todayStr());
+  const [playing, setPlaying] = createSignal<Playing | null>(null);
+
+  // Day window [from, to) in epoch ms, for the timeline queries.
+  const dayRange = createMemo(() => {
+    const [y, m, d] = day().split("-").map((n) => parseInt(n, 10));
+    const from = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+    return { from, to: from + 24 * 60 * 60 * 1000, date: new Date(from) };
+  });
+
   const [recs, { refetch }] = createResource(
-    () => ({ id: camId() }),
-    ({ id }) => api<Recording[]>("/recordings?limit=500" + (id ? "&cameraId=" + id : "")),
+    () => ({ id: camId(), ...dayRange() }),
+    ({ id, from, to }) =>
+      api<Recording[]>(`/recordings?limit=1000&from=${from}&to=${to}` + (id ? "&cameraId=" + id : "")),
   );
-  const [playing, setPlaying] = createSignal<Recording | null>(null);
+  const [events] = createResource(
+    () => ({ id: camId(), ...dayRange() }),
+    ({ id, from, to }) =>
+      api<NvrEvent[]>(`/events?limit=1000&from=${from}&to=${to}` + (id ? "&cameraId=" + id : "")),
+  );
 
   const camName = createMemo(() => {
     const m: Record<string, string> = {};
@@ -47,7 +74,7 @@ function Recordings() {
     <>
       <h1 class="text-[22px] font-semibold mb-5">录像回放</h1>
 
-      <div class="flex items-center gap-2.5 mb-4">
+      <div class="flex items-center gap-2.5 mb-4 flex-wrap">
         <select
           class="select select-bordered select-sm max-w-[240px]"
           value={camId()}
@@ -56,9 +83,24 @@ function Recordings() {
           <option value="">全部摄像头</option>
           <For each={cameras()}>{(c) => <option value={c.id}>{c.name}</option>}</For>
         </select>
+        <input
+          type="date"
+          class="input input-bordered input-sm"
+          value={day()}
+          onInput={(e) => setDay(e.currentTarget.value)}
+        />
         <button class="btn btn-ghost btn-sm" onClick={() => void refetch()}>
           刷新
         </button>
+      </div>
+
+      <div class="card bg-base-200 border border-base-300 p-4 mb-4">
+        <Timeline
+          date={dayRange().date}
+          recordings={recs() ?? []}
+          events={events() ?? []}
+          onSeek={(rec, offset) => setPlaying({ rec, offset })}
+        />
       </div>
 
       <div class="card bg-base-200 border border-base-300 overflow-x-auto">
@@ -79,7 +121,7 @@ function Recordings() {
               fallback={
                 <tr>
                   <td colspan="6" class="text-center text-base-content/60 py-8">
-                    {recs.loading ? "加载中…" : "暂无录像"}
+                    {recs.loading ? "加载中…" : "当天暂无录像"}
                   </td>
                 </tr>
               }
@@ -100,7 +142,7 @@ function Recordings() {
                       <button
                         class="btn btn-ghost btn-xs"
                         disabled={!r.complete}
-                        onClick={() => setPlaying(r)}
+                        onClick={() => setPlaying({ rec: r, offset: 0 })}
                       >
                         播放
                       </button>
@@ -120,16 +162,25 @@ function Recordings() {
       </div>
 
       <Show when={playing()}>
-        {(r) => (
+        {(p) => (
           <Modal title="录像回放" hideOk width={760} onClose={() => setPlaying(null)}>
             <video
               controls
               autoplay
               class="w-full bg-black rounded-lg"
-              src={fileUrl(r())}
+              src={fileUrl(p().rec)}
+              onLoadedMetadata={(e) => {
+                if (p().offset > 0) {
+                  try {
+                    e.currentTarget.currentTime = p().offset;
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }}
             />
             <p class="text-sm text-base-content/60 mt-2">
-              {(camName()[r().cameraId] ?? "") + " · " + fmtTime(r().startTime)}
+              {(camName()[p().rec.cameraId] ?? "") + " · " + fmtTime(p().rec.startTime)}
             </p>
           </Modal>
         )}

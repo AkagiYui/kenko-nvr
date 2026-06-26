@@ -16,6 +16,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/core"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
 	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
+	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	"github.com/AkagiYui/kenko-nvr/internal/rtmp"
 	"github.com/AkagiYui/kenko-nvr/internal/rtsp"
 )
@@ -41,11 +42,18 @@ type Manager struct {
 	// non-H.264 cameras to a browser-playable live stream. nil if FFmpeg is
 	// absent (such cameras then fall back to their unmodified stream).
 	liveEncoder *hwaccel.Encoder
+
+	// notifier delivers motion / offline alerts (nil disables notifications).
+	notifier *notify.Notifier
 }
 
 // SetLiveEncoder sets the encoder used for on-demand live transcoding. Call it
 // once at startup, before Start.
 func (m *Manager) SetLiveEncoder(e *hwaccel.Encoder) { m.liveEncoder = e }
+
+// SetNotifier sets the notifier used for motion / offline alerts. Call it once
+// at startup, before Start.
+func (m *Manager) SetNotifier(n *notify.Notifier) { m.notifier = n }
 
 // New creates a Manager.
 func New(cfg config.Config, db *database.DB, log *slog.Logger) *Manager {
@@ -203,6 +211,7 @@ type CameraStatus struct {
 	Error     string      `json:"error,omitempty"`
 	Live      bool        `json:"live"`
 	Recording bool        `json:"recording"`
+	Motion    bool        `json:"motion"`
 	Tracks    []TrackInfo `json:"tracks,omitempty"`
 }
 
@@ -272,6 +281,29 @@ func (m *Manager) OnPublishStop(streamKey string) {
 	if rt := m.runtime(streamKey); rt != nil {
 		rt.detachPush()
 	}
+}
+
+// notify delivers a notification asynchronously, gated by the per-kind settings
+// flags, if a notifier is configured.
+func (m *Manager) notify(n notify.Notification) {
+	if m.notifier == nil {
+		return
+	}
+	cfg, _ := m.db.Settings.Notifications()
+	if !cfg.Enabled {
+		return
+	}
+	switch n.Kind {
+	case "motion":
+		if !cfg.OnMotion {
+			return
+		}
+	case "offline":
+		if !cfg.OnCameraOffline {
+			return
+		}
+	}
+	go m.notifier.Notify(context.Background(), n)
 }
 
 // recordingConfig snapshots the current recording settings.

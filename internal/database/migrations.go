@@ -44,6 +44,43 @@ var migrations = []string{
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	)`,
+
+	// --- v7: multi-user / RBAC ----------------------------------------------
+	`CREATE TABLE IF NOT EXISTS users (
+		id            TEXT PRIMARY KEY,
+		username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+		password_hash TEXT NOT NULL,
+		role          TEXT NOT NULL DEFAULT 'viewer',
+		created_at    INTEGER NOT NULL DEFAULT 0,
+		updated_at    INTEGER NOT NULL DEFAULT 0
+	)`,
+
+	// --- v8: motion events --------------------------------------------------
+	`CREATE TABLE IF NOT EXISTS events (
+		id          TEXT PRIMARY KEY,
+		camera_id   TEXT NOT NULL,
+		type        TEXT NOT NULL DEFAULT 'motion',
+		start_time  INTEGER NOT NULL,
+		end_time    INTEGER NOT NULL DEFAULT 0,
+		score       REAL NOT NULL DEFAULT 0,
+		created_at  INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_events_camera ON events(camera_id, start_time)`,
+
+	// --- v9: web-push subscriptions -----------------------------------------
+	`CREATE TABLE IF NOT EXISTS push_subscriptions (
+		id         TEXT PRIMARY KEY,
+		endpoint   TEXT NOT NULL UNIQUE,
+		p256dh     TEXT NOT NULL,
+		auth       TEXT NOT NULL,
+		created_at INTEGER NOT NULL DEFAULT 0
+	)`,
+
+	// --- v10: per-camera motion / event-recording settings ------------------
+	`ALTER TABLE cameras ADD COLUMN motion_enabled INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE cameras ADD COLUMN record_mode TEXT NOT NULL DEFAULT 'continuous'`,
+	`ALTER TABLE cameras ADD COLUMN motion_sensitivity INTEGER NOT NULL DEFAULT 50`,
 }
 
 func (d *DB) migrate() error {

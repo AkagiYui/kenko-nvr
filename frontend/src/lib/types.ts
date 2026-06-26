@@ -2,6 +2,8 @@
 
 export type SourceType = "rtsp" | "onvif" | "rtmp";
 export type CameraState = "running" | "connecting" | "error" | "idle";
+export type Role = "admin" | "operator" | "viewer";
+export type RecordMode = "continuous" | "motion";
 
 export interface TrackInfo {
   kind: string;
@@ -14,6 +16,7 @@ export interface CameraStatus {
   error?: string;
   live?: boolean;
   recording?: boolean;
+  motion?: boolean;
   tracks?: TrackInfo[];
 }
 
@@ -30,6 +33,9 @@ export interface Camera {
   onvifXAddr?: string;
   onvifUsername?: string;
   onvifProfile?: string;
+  motionEnabled?: boolean;
+  recordMode?: RecordMode;
+  motionSensitivity?: number;
   status?: CameraStatus;
 }
 
@@ -48,16 +54,43 @@ export interface CameraInput {
   onvifUsername: string;
   onvifPassword: string;
   onvifProfile: string;
+  motionEnabled: boolean;
+  recordMode: RecordMode;
+  motionSensitivity: number;
 }
 
 export interface Recording {
   id: string;
   cameraId: string;
   startTime: string;
+  endTime?: string;
   durationMs?: number;
   sizeBytes?: number;
   uploaded?: boolean;
   complete?: boolean;
+}
+
+// NvrEvent is a detected event (motion). Named to avoid clashing with DOM Event.
+export interface NvrEvent {
+  id: string;
+  cameraId: string;
+  type: string;
+  startTime: string;
+  endTime?: string;
+  score?: number;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  role: Role;
+  createdAt?: string;
+}
+
+export interface Me {
+  id: string;
+  username: string;
+  role: Role;
 }
 
 export interface RecordingConfig {
@@ -89,6 +122,48 @@ export interface S3Config {
   proxyURL: string;
   useSSL: boolean;
   deleteLocalAfterUpload: boolean;
+}
+
+export interface EmailConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  from: string;
+  to: string;
+  useTLS: boolean;
+}
+
+export interface WebhookConfig {
+  enabled: boolean;
+  url: string;
+}
+
+export interface MQTTConfig {
+  enabled: boolean;
+  brokerURL: string;
+  username: string;
+  password: string;
+  topic: string;
+  clientID: string;
+}
+
+export interface WebPushConfig {
+  enabled: boolean;
+  subject: string;
+  publicKey?: string;
+}
+
+export interface NotificationConfig {
+  enabled: boolean;
+  onMotion: boolean;
+  onCameraOffline: boolean;
+  minIntervalSeconds: number;
+  email: EmailConfig;
+  webhook: WebhookConfig;
+  mqtt: MQTTConfig;
+  webPush: WebPushConfig;
 }
 
 export interface OnvifDevice {

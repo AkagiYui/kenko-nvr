@@ -35,11 +35,15 @@ func timeToMS(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
+// cameraColumns is the ordered column list shared by every camera query and the
+// scanCamera helper (they must stay in sync).
+const cameraColumns = `id, name, enabled, source_type, url, username, password,
+	transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
+	onvif_profile, motion_enabled, record_mode, motion_sensitivity, created_at, updated_at`
+
 // List returns all cameras ordered by name.
 func (s *CameraStore) List() ([]Camera, error) {
-	rows, err := s.db.Query(`SELECT id, name, enabled, source_type, url, username, password,
-		transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
-		onvif_profile, created_at, updated_at FROM cameras ORDER BY name`)
+	rows, err := s.db.Query(`SELECT ` + cameraColumns + ` FROM cameras ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -58,9 +62,7 @@ func (s *CameraStore) List() ([]Camera, error) {
 
 // Get returns one camera by ID.
 func (s *CameraStore) Get(id string) (Camera, error) {
-	row := s.db.QueryRow(`SELECT id, name, enabled, source_type, url, username, password,
-		transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
-		onvif_profile, created_at, updated_at FROM cameras WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT `+cameraColumns+` FROM cameras WHERE id = ?`, id)
 	c, err := scanCamera(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Camera{}, ErrNotFound
@@ -74,11 +76,12 @@ func (s *CameraStore) Create(c Camera) error {
 	c.CreatedAt, c.UpdatedAt = now, now
 	_, err := s.db.Exec(`INSERT INTO cameras (id, name, enabled, source_type, url, username,
 		password, transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
-		onvif_profile, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		onvif_profile, motion_enabled, record_mode, motion_sensitivity, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, boolToInt(c.Enabled), string(c.SourceType), c.URL, c.Username, c.Password,
 		c.Transport, boolToInt(c.Record), boolToInt(c.OnvifEnabled), c.OnvifXAddr, c.OnvifUsername,
-		c.OnvifPassword, c.OnvifProfile, timeToMS(c.CreatedAt), timeToMS(c.UpdatedAt))
+		c.OnvifPassword, c.OnvifProfile, boolToInt(c.MotionEnabled), c.RecordMode, c.MotionSensitivity,
+		timeToMS(c.CreatedAt), timeToMS(c.UpdatedAt))
 	return err
 }
 
@@ -87,10 +90,12 @@ func (s *CameraStore) Update(c Camera) error {
 	c.UpdatedAt = time.Now()
 	res, err := s.db.Exec(`UPDATE cameras SET name=?, enabled=?, source_type=?, url=?, username=?,
 		password=?, transport=?, record=?, onvif_enabled=?, onvif_xaddr=?, onvif_username=?,
-		onvif_password=?, onvif_profile=?, updated_at=? WHERE id=?`,
+		onvif_password=?, onvif_profile=?, motion_enabled=?, record_mode=?, motion_sensitivity=?,
+		updated_at=? WHERE id=?`,
 		c.Name, boolToInt(c.Enabled), string(c.SourceType), c.URL, c.Username, c.Password,
 		c.Transport, boolToInt(c.Record), boolToInt(c.OnvifEnabled), c.OnvifXAddr, c.OnvifUsername,
-		c.OnvifPassword, c.OnvifProfile, timeToMS(c.UpdatedAt), c.ID)
+		c.OnvifPassword, c.OnvifProfile, boolToInt(c.MotionEnabled), c.RecordMode, c.MotionSensitivity,
+		timeToMS(c.UpdatedAt), c.ID)
 	if err != nil {
 		return err
 	}
@@ -120,18 +125,22 @@ type scanner interface {
 
 func scanCamera(sc scanner) (Camera, error) {
 	var c Camera
-	var enabled, record, onvifEnabled int
+	var enabled, record, onvifEnabled, motionEnabled int
 	var srcType string
 	var createdAt, updatedAt int64
 	err := sc.Scan(&c.ID, &c.Name, &enabled, &srcType, &c.URL, &c.Username, &c.Password,
 		&c.Transport, &record, &onvifEnabled, &c.OnvifXAddr, &c.OnvifUsername, &c.OnvifPassword,
-		&c.OnvifProfile, &createdAt, &updatedAt)
+		&c.OnvifProfile, &motionEnabled, &c.RecordMode, &c.MotionSensitivity, &createdAt, &updatedAt)
 	if err != nil {
 		return Camera{}, err
 	}
 	c.Enabled = enabled != 0
 	c.Record = record != 0
 	c.OnvifEnabled = onvifEnabled != 0
+	c.MotionEnabled = motionEnabled != 0
+	if c.RecordMode == "" {
+		c.RecordMode = "continuous"
+	}
 	c.SourceType = SourceType(srcType)
 	c.CreatedAt = msToTime(createdAt)
 	c.UpdatedAt = msToTime(updatedAt)

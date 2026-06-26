@@ -28,8 +28,10 @@ FROM gcr.io/distroless/static-debian12
 WORKDIR /app
 COPY --from=build /out/kenko-nvr /app/kenko-nvr
 
-# 8080: web UI / API / HLS   1935: RTMP ingest
-EXPOSE 8080 1935
+# 8080: web UI / API / HLS / WebRTC signalling   1935: RTMP ingest
+# 8554: RTSP re-publish (external pull). WebRTC media uses ephemeral UDP ports,
+# so run with host networking for cross-container/LAN WebRTC.
+EXPOSE 8080 1935 8554
 VOLUME ["/app/data"]
 
 ENTRYPOINT ["/app/kenko-nvr", "-config", "/app/config.yaml"]

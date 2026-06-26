@@ -17,12 +17,14 @@ import (
 
 // Config is the root bootstrap configuration.
 type Config struct {
-	HTTP      HTTPConfig      `yaml:"http"`
-	RTMP      RTMPConfig      `yaml:"rtmp"`
-	RTSP      RTSPConfig      `yaml:"rtsp"`
-	Storage   StorageConfig   `yaml:"storage"`
-	Transcode TranscodeConfig `yaml:"transcode"`
-	Log       LogConfig       `yaml:"log"`
+	HTTP       HTTPConfig       `yaml:"http"`
+	RTMP       RTMPConfig       `yaml:"rtmp"`
+	RTSP       RTSPConfig       `yaml:"rtsp"`
+	RTSPServer RTSPServerConfig `yaml:"rtsp_server"`
+	WebRTC     WebRTCConfig     `yaml:"webrtc"`
+	Storage    StorageConfig    `yaml:"storage"`
+	Transcode  TranscodeConfig  `yaml:"transcode"`
+	Log        LogConfig        `yaml:"log"`
 }
 
 // HTTPConfig configures the management/API/HLS web server.
@@ -45,6 +47,22 @@ type RTMPConfig struct {
 type RTSPConfig struct {
 	// Transport is the preferred lower transport: "automatic", "tcp" or "udp".
 	Transport string `yaml:"transport"`
+}
+
+// RTSPServerConfig configures the RTSP re-publishing server, which lets external
+// clients pull rtsp://host:<addr>/<cameraID>.
+type RTSPServerConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Addr    string `yaml:"addr"`
+}
+
+// WebRTCConfig configures low-latency WebRTC live view.
+type WebRTCConfig struct {
+	// Enabled turns the WHEP WebRTC endpoint on.
+	Enabled bool `yaml:"enabled"`
+	// STUNServers are ICE STUN servers used for NAT traversal across networks
+	// (a LAN deployment works without any). e.g. ["stun:stun.l.google.com:19302"].
+	STUNServers []string `yaml:"stun_servers"`
 }
 
 // StorageConfig configures local storage locations.
@@ -89,6 +107,13 @@ func Default() Config {
 		},
 		RTSP: RTSPConfig{
 			Transport: "automatic",
+		},
+		RTSPServer: RTSPServerConfig{
+			Enabled: true,
+			Addr:    ":8554",
+		},
+		WebRTC: WebRTCConfig{
+			Enabled: true,
 		},
 		Storage: StorageConfig{
 			RecordingsDir: "./data/recordings",
