@@ -162,12 +162,12 @@ type WebhookConfig struct {
 
 // MQTTConfig configures publishing alerts to an MQTT broker.
 type MQTTConfig struct {
-	Enabled  bool   `json:"enabled"`
+	Enabled   bool   `json:"enabled"`
 	BrokerURL string `json:"brokerURL"` // e.g. tcp://broker:1883
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Topic    string `json:"topic"` // e.g. kenko-nvr/events
-	ClientID string `json:"clientID"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	Topic     string `json:"topic"` // e.g. kenko-nvr/events
+	ClientID  string `json:"clientID"`
 }
 
 // WebPushConfig configures browser Web Push (VAPID). The keypair is generated

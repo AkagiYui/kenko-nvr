@@ -15,9 +15,9 @@ import (
 // downscaled analysis frame geometry and sample rate. Tiny frames keep the diff
 // cheap; 16:9 keeps aspect close to typical cameras.
 const (
-	frameW    = 64
-	frameH    = 36
-	frameRate = 4
+	frameW     = 64
+	frameH     = 36
+	frameRate  = 4
 	pixelDelta = 18
 )
 
