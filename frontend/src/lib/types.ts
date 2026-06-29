@@ -82,6 +82,9 @@ export interface NvrEvent {
   startTime: number; // epoch milliseconds (UTC)
   endTime?: number; // epoch milliseconds; null/absent while in progress
   score?: number;
+  // recordings is present only when the event was fetched with
+  // ?withRecordings=1: the clips whose span covers the event, oldest first.
+  recordings?: Recording[];
 }
 
 export interface User {

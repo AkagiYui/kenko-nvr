@@ -4,18 +4,14 @@ import { api, getToken } from "~/lib/api";
 import { toast } from "~/components/toast";
 import { Modal } from "~/components/Modal";
 import { Timeline } from "~/components/Timeline";
+import { RangePicker } from "~/components/RangePicker";
+import { defaultRange } from "~/lib/timerange";
 import { fmtDur, fmtSize, fmtTime } from "~/lib/format";
 import type { Camera, NvrEvent, Recording } from "~/lib/types";
 
 export const Route = createFileRoute("/_authed/recordings")({
   component: Recordings,
 });
-
-function todayStr(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 interface Playing {
   rec: Recording;
@@ -25,25 +21,21 @@ interface Playing {
 function Recordings() {
   const [cameras] = createResource<Camera[]>(() => api("/cameras"));
   const [camId, setCamId] = createSignal("");
-  const [day, setDay] = createSignal(todayStr());
+  const init = defaultRange();
+  const [from, setFrom] = createSignal(init.from);
+  const [to, setTo] = createSignal(init.to);
   const [playing, setPlaying] = createSignal<Playing | null>(null);
 
-  // Day window [from, to) in epoch ms, for the timeline queries.
-  const dayRange = createMemo(() => {
-    const [y, m, d] = day().split("-").map((n) => parseInt(n, 10));
-    const from = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-    return { from, to: from + 24 * 60 * 60 * 1000, date: new Date(from) };
+  // Shared query string for the recordings + events (timeline) fetches.
+  const query = createMemo(() => {
+    const p = new URLSearchParams({ limit: "1000", from: String(from()), to: String(to()) });
+    if (camId()) p.set("cameraId", camId());
+    return p.toString();
   });
 
-  const [recs, { refetch }] = createResource(
-    () => ({ id: camId(), ...dayRange() }),
-    ({ id, from, to }) =>
-      api<Recording[]>(`/recordings?limit=1000&from=${from}&to=${to}` + (id ? "&cameraId=" + id : "")),
-  );
-  const [events] = createResource(
-    () => ({ id: camId(), ...dayRange() }),
-    ({ id, from, to }) =>
-      api<NvrEvent[]>(`/events?limit=1000&from=${from}&to=${to}` + (id ? "&cameraId=" + id : "")),
+  const [recs, { refetch }] = createResource(query, (qs) => api<Recording[]>(`/recordings?${qs}`));
+  const [events, { refetch: refetchEvents }] = createResource(query, (qs) =>
+    api<NvrEvent[]>(`/events?${qs}`),
   );
 
   const camName = createMemo(() => {
@@ -83,20 +75,22 @@ function Recordings() {
           <option value="">全部摄像头</option>
           <For each={cameras()}>{(c) => <option value={c.id}>{c.name}</option>}</For>
         </select>
-        <input
-          type="date"
-          class="input input-bordered input-sm"
-          value={day()}
-          onInput={(e) => setDay(e.currentTarget.value)}
-        />
-        <button class="btn btn-ghost btn-sm" onClick={() => void refetch()}>
+        <RangePicker from={from()} to={to()} onChange={(f, t) => { setFrom(f); setTo(t); }} />
+        <button
+          class="btn btn-ghost btn-sm"
+          onClick={() => {
+            void refetch();
+            void refetchEvents();
+          }}
+        >
           刷新
         </button>
       </div>
 
       <div class="card bg-base-200 border border-base-300 p-4 mb-4">
         <Timeline
-          date={dayRange().date}
+          start={from()}
+          end={to()}
           recordings={recs() ?? []}
           events={events() ?? []}
           onSeek={(rec, offset) => setPlaying({ rec, offset })}

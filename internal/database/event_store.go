@@ -13,13 +13,22 @@ type EventStore struct {
 
 const eventColumns = `id, camera_id, type, start_time, end_time, score, created_at`
 
-// EventFilter narrows an events query.
+// EventFilter narrows an events query. CameraIDs and Types are OR-sets: empty
+// means "any".
 type EventFilter struct {
-	CameraID string
-	Type     EventType
-	From     time.Time
-	To       time.Time
-	Limit    int
+	CameraIDs []string
+	Types     []EventType
+	From      time.Time
+	To        time.Time
+	Limit     int
+}
+
+// inPlaceholders returns "?,?,..." with n placeholders for a SQL IN clause.
+func inPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
 }
 
 // Create inserts a new event.
@@ -46,13 +55,17 @@ func (s *EventStore) Finalize(id string, end time.Time, score float64) error {
 func (s *EventStore) List(f EventFilter) ([]Event, error) {
 	var where []string
 	var args []any
-	if f.CameraID != "" {
-		where = append(where, "camera_id = ?")
-		args = append(args, f.CameraID)
+	if len(f.CameraIDs) > 0 {
+		where = append(where, "camera_id IN ("+inPlaceholders(len(f.CameraIDs))+")")
+		for _, id := range f.CameraIDs {
+			args = append(args, id)
+		}
 	}
-	if f.Type != "" {
-		where = append(where, "type = ?")
-		args = append(args, string(f.Type))
+	if len(f.Types) > 0 {
+		where = append(where, "type IN ("+inPlaceholders(len(f.Types))+")")
+		for _, t := range f.Types {
+			args = append(args, string(t))
+		}
 	}
 	if !f.From.IsZero() {
 		where = append(where, "start_time >= ?")

@@ -115,6 +115,37 @@ func (s *RecordingStore) List(f RecordingFilter) ([]Recording, error) {
 	return out, rows.Err()
 }
 
+// ListOverlapping returns recordings whose time span intersects [from, to],
+// oldest first, optionally restricted to a set of cameras (empty = any). A
+// recording overlaps when it started at or before `to` and either is still in
+// progress or ended at or after `from`. Used to find the clips for an event.
+func (s *RecordingStore) ListOverlapping(cameraIDs []string, from, to time.Time) ([]Recording, error) {
+	where := []string{"start_time <= ?", "(complete = 0 OR end_time >= ?)"}
+	args := []any{timeToMS(to), timeToMS(from)}
+	if len(cameraIDs) > 0 {
+		where = append(where, "camera_id IN ("+inPlaceholders(len(cameraIDs))+")")
+		for _, id := range cameraIDs {
+			args = append(args, id)
+		}
+	}
+	q := recordingSelect + " WHERE " + strings.Join(where, " AND ") + " ORDER BY start_time ASC"
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Recording
+	for rows.Next() {
+		r, err := scanRecording(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // PendingUploads returns completed recordings not yet uploaded, oldest first.
 func (s *RecordingStore) PendingUploads(limit int) ([]Recording, error) {
 	rows, err := s.db.Query(recordingSelect+

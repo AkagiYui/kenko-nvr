@@ -120,6 +120,71 @@ func TestRecordingLifecycle(t *testing.T) {
 	}
 }
 
+func TestRecordingListOverlapping(t *testing.T) {
+	db := openTest(t)
+	if err := db.Cameras.Create(Camera{ID: "c", Name: "c", SourceType: SourceRTSP}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Cameras.Create(Camera{ID: "other", Name: "o", SourceType: SourceRTSP}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	mk := func(id string, cam string, startMin, durMin int, complete bool) {
+		start := base.Add(time.Duration(startMin) * time.Minute)
+		if err := db.Recordings.Create(Recording{ID: id, CameraID: cam, Path: id + ".mp4", StartTime: MS(start)}); err != nil {
+			t.Fatal(err)
+		}
+		if complete {
+			end := start.Add(time.Duration(durMin) * time.Minute)
+			if err := db.Recordings.Finalize(id, end, int64(durMin)*60000, 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// Three 10-min segments back-to-back, plus an in-progress one and a clip on
+	// a different camera.
+	mk("a", "c", 0, 10, true)     // 12:00–12:10
+	mk("b", "c", 10, 10, true)    // 12:10–12:20
+	mk("c", "c", 20, 10, true)    // 12:20–12:30
+	mk("live", "c", 30, 0, false) // 12:30–(now); in progress
+	mk("x", "other", 10, 10, true)
+
+	// An event at 12:10:30 falls inside segment b only.
+	got, err := db.Recordings.ListOverlapping([]string{"c"}, base.Add(10*time.Minute+30*time.Second), base.Add(10*time.Minute+45*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("event inside b: expected [b], got %v", ids(got))
+	}
+
+	// An event straddling the b/c boundary overlaps both.
+	got, _ = db.Recordings.ListOverlapping([]string{"c"}, base.Add(19*time.Minute), base.Add(21*time.Minute))
+	if len(got) != 2 || got[0].ID != "b" || got[1].ID != "c" {
+		t.Fatalf("event across b/c boundary: expected [b c], got %v", ids(got))
+	}
+
+	// An event in the in-progress segment matches it despite the unset end time.
+	got, _ = db.Recordings.ListOverlapping([]string{"c"}, base.Add(40*time.Minute), base.Add(41*time.Minute))
+	if len(got) != 1 || got[0].ID != "live" {
+		t.Fatalf("event in live segment: expected [live], got %v", ids(got))
+	}
+
+	// The camera filter excludes the other camera's overlapping clip.
+	got, _ = db.Recordings.ListOverlapping([]string{"c"}, base.Add(12*time.Minute), base.Add(13*time.Minute))
+	if len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("camera filter: expected [b], got %v", ids(got))
+	}
+}
+
+func ids(recs []Recording) []string {
+	out := make([]string, len(recs))
+	for i, r := range recs {
+		out[i] = r.ID
+	}
+	return out
+}
+
 func TestRecordingFilterAndCascade(t *testing.T) {
 	db := openTest(t)
 	db.Cameras.Create(Camera{ID: "a", Name: "a"})

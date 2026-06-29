@@ -72,12 +72,17 @@ func TestEventStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, err := db.Events.List(EventFilter{CameraID: "c"})
+	list, err := db.Events.List(EventFilter{CameraIDs: []string{"c"}, Types: []EventType{EventMotion}})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list = %d err=%v", len(list), err)
 	}
 	if list[0].Score != 0.42 || list[0].EndTime.IsZero() {
 		t.Errorf("finalize not applied: %+v", list[0])
+	}
+
+	// A non-matching type filters the event out.
+	if got, _ := db.Events.List(EventFilter{Types: []EventType{"other"}}); len(got) != 0 {
+		t.Errorf("expected no events for unmatched type, got %d", len(got))
 	}
 
 	// Time-window filter.
