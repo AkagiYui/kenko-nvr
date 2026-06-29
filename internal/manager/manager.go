@@ -18,6 +18,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/gb28181"
 	"github.com/AkagiYui/kenko-nvr/internal/hadiscovery"
 	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
+	"github.com/AkagiYui/kenko-nvr/internal/netstat"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	"github.com/AkagiYui/kenko-nvr/internal/rtmp"
 	"github.com/AkagiYui/kenko-nvr/internal/rtsp"
@@ -37,6 +38,19 @@ type Manager struct {
 
 	mu   sync.Mutex
 	cams map[string]*camRuntime
+
+	// Traffic accounting, sampled on a ticker so rates are independent of how
+	// often callers poll. camLast holds the last cumulative BytesIn seen per
+	// camera (to absorb the per-reconnect stream counter reset); each interval's
+	// camera delta is folded into the process-wide netstat ingress counter. The
+	// in/out rates are then derived from the netstat totals, which also include
+	// client-facing traffic captured at the HTTP listener.
+	netMu       sync.Mutex
+	camLast     map[string]uint64
+	lastIngress uint64
+	lastEgress  uint64
+	ingressRate float64
+	egressRate  float64
 
 	rtmpServer *rtmp.Server
 
@@ -119,6 +133,7 @@ func New(cfg config.Config, db *database.DB, log *slog.Logger) *Manager {
 		log:            log,
 		recordingsRoot: cfg.Storage.RecordingsDir,
 		cams:           make(map[string]*camRuntime),
+		camLast:        make(map[string]uint64),
 	}
 }
 
@@ -141,6 +156,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		}()
 	}
 
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		m.sampleTrafficLoop(m.ctx)
+	}()
+
 	cams, err := m.db.Cameras.List()
 	if err != nil {
 		return err
@@ -151,6 +172,61 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// trafficSampleInterval is how often ingest traffic is sampled to derive a rate.
+const trafficSampleInterval = 2 * time.Second
+
+// sampleTrafficLoop periodically folds each camera's cumulative ingest byte
+// count into a monotonic system total and a per-interval bytes/sec rate.
+func (m *Manager) sampleTrafficLoop(ctx context.Context) {
+	t := time.NewTicker(trafficSampleInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.sampleTraffic()
+		}
+	}
+}
+
+func (m *Manager) sampleTraffic() {
+	m.mu.Lock()
+	cur := make(map[string]uint64, len(m.cams))
+	for id, rt := range m.cams {
+		if s := rt.currentStream(); s != nil {
+			cur[id] = s.BytesIn()
+		}
+	}
+	m.mu.Unlock()
+
+	// Fold this interval's camera ingest into the global ingress counter.
+	var camDelta uint64
+	for id, c := range cur {
+		prev := m.camLast[id]
+		if c >= prev {
+			// Common case: counter advanced on the same stream.
+			camDelta += c - prev
+		} else {
+			// The stream was replaced on reconnect, resetting its counter; the
+			// new value is itself the delta since the last sample.
+			camDelta += c
+		}
+	}
+	m.camLast = cur
+	netstat.AddIngress(camDelta)
+
+	// Derive in/out rates from the netstat totals (camera ingest + client I/O).
+	ing := netstat.Ingress()
+	eg := netstat.Egress()
+	m.netMu.Lock()
+	m.ingressRate = float64(ing-m.lastIngress) / trafficSampleInterval.Seconds()
+	m.egressRate = float64(eg-m.lastEgress) / trafficSampleInterval.Seconds()
+	m.lastIngress = ing
+	m.lastEgress = eg
+	m.netMu.Unlock()
 }
 
 // Stop tears down all runtimes and waits for them to exit.
@@ -299,6 +375,44 @@ func (m *Manager) AllStatus() map[string]CameraStatus {
 	return out
 }
 
+// SystemStats is a snapshot of system-wide camera counts and network throughput.
+// Rates are bytes/sec, split from the server's perspective: ingress (下行) is
+// data received (camera media + client requests), egress (上行) is data sent to
+// clients (live video, downloads, the web UI/API).
+type SystemStats struct {
+	Cameras            int     `json:"cameras"`
+	Online             int     `json:"online"`
+	Recording          int     `json:"recording"`
+	IngressBytesPerSec float64 `json:"ingressBytesPerSec"`
+	EgressBytesPerSec  float64 `json:"egressBytesPerSec"`
+	IngressTotalBytes  uint64  `json:"ingressTotalBytes"`
+	EgressTotalBytes   uint64  `json:"egressTotalBytes"`
+}
+
+// SystemStats returns aggregate camera counts and the current network throughput.
+func (m *Manager) SystemStats() SystemStats {
+	m.mu.Lock()
+	st := SystemStats{Cameras: len(m.cams)}
+	for _, rt := range m.cams {
+		s := rt.status()
+		if s.Live {
+			st.Online++
+		}
+		if s.Recording {
+			st.Recording++
+		}
+	}
+	m.mu.Unlock()
+
+	m.netMu.Lock()
+	st.IngressBytesPerSec = m.ingressRate
+	st.EgressBytesPerSec = m.egressRate
+	m.netMu.Unlock()
+	st.IngressTotalBytes = netstat.Ingress()
+	st.EgressTotalBytes = netstat.Egress()
+	return st
+}
+
 // --- recording.Sink -----------------------------------------------------------
 
 // SegmentStarted records a new in-progress recording row.
@@ -308,8 +422,8 @@ func (m *Manager) SegmentStarted(cameraID, relPath string, start time.Time) (str
 		ID:        id,
 		CameraID:  cameraID,
 		Path:      relPath,
-		StartTime: start,
-		CreatedAt: time.Now(),
+		StartTime: database.MS(start),
+		CreatedAt: database.MS(time.Now()),
 	})
 	return id, err
 }

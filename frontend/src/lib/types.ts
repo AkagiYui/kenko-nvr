@@ -66,8 +66,8 @@ export interface CameraInput {
 export interface Recording {
   id: string;
   cameraId: string;
-  startTime: string;
-  endTime?: string;
+  startTime: number; // epoch milliseconds (UTC); render in the viewer's timezone
+  endTime?: number; // epoch milliseconds; null/absent while in progress
   durationMs?: number;
   sizeBytes?: number;
   uploaded?: boolean;
@@ -79,8 +79,8 @@ export interface NvrEvent {
   id: string;
   cameraId: string;
   type: string;
-  startTime: string;
-  endTime?: string;
+  startTime: number; // epoch milliseconds (UTC)
+  endTime?: number; // epoch milliseconds; null/absent while in progress
   score?: number;
 }
 
@@ -88,13 +88,26 @@ export interface User {
   id: string;
   username: string;
   role: Role;
-  createdAt?: string;
+  createdAt?: number; // epoch milliseconds (UTC)
 }
 
 export interface Me {
   id: string;
   username: string;
   role: Role;
+}
+
+// SystemStats is the aggregate dashboard footer payload from GET /api/stats.
+// Throughput is split from the server's perspective: ingress (下行) is data the
+// server receives (camera streams), egress (上行) is data it sends to clients.
+export interface SystemStats {
+  cameras: number;
+  online: number;
+  recording: number;
+  ingressBytesPerSec: number;
+  egressBytesPerSec: number;
+  ingressTotalBytes: number;
+  egressTotalBytes: number;
 }
 
 export interface RecordingConfig {

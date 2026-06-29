@@ -2,7 +2,10 @@ import { render } from "solid-js/web";
 import { RouterProvider, createRouter } from "@tanstack/solid-router";
 import { routeTree } from "./routeTree.gen";
 import { onUnauthorized } from "./lib/api";
+import { initTheme } from "./lib/theme";
 import "./styles.css";
+
+initTheme();
 
 const router = createRouter({ routeTree, defaultPreload: "intent" });
 

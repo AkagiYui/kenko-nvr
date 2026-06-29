@@ -5,7 +5,6 @@
    over while the components come from daisyUI. */
 @plugin "daisyui/theme" {
   name: "kenko";
-  default: true;
   prefersdark: true;
   color-scheme: dark;
 
@@ -30,6 +29,41 @@
   --color-warning: #f59e0b;
   --color-warning-content: #1a1203;
   --color-error: #ef4444;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+  --border: 1px;
+}
+
+/* Light counterpart, sharing the brand blue so the two schemes feel related. */
+@plugin "daisyui/theme" {
+  name: "kenko-light";
+  default: true;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f4f6f9;
+  --color-base-300: #e3e8ef;
+  --color-base-content: #1a1f27;
+
+  --color-primary: #2563eb;
+  --color-primary-content: #ffffff;
+  --color-secondary: #e3e8ef;
+  --color-secondary-content: #1a1f27;
+  --color-accent: #3b82f6;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1a1f27;
+  --color-neutral-content: #f4f6f9;
+
+  --color-info: #2563eb;
+  --color-info-content: #ffffff;
+  --color-success: #16a34a;
+  --color-success-content: #ffffff;
+  --color-warning: #d97706;
+  --color-warning-content: #ffffff;
+  --color-error: #dc2626;
   --color-error-content: #ffffff;
 
   --radius-selector: 0.5rem;

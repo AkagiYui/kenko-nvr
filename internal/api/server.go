@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
+	"github.com/AkagiYui/kenko-nvr/internal/netstat"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	webui "github.com/AkagiYui/kenko-nvr/internal/web"
 )
@@ -73,6 +75,7 @@ func (s *Server) router() http.Handler {
 			r.Get("/cameras/{id}", s.handleGetCamera)
 			r.Get("/cameras/{id}/status", s.handleCameraStatus)
 			r.Get("/status", s.handleAllStatus)
+			r.Get("/stats", s.handleStats)
 			r.Get("/cameras/{id}/ptz/presets", s.handlePTZPresets)
 			r.Get("/recordings", s.handleListRecordings)
 			r.Get("/recordings/{id}", s.handleGetRecording)
@@ -148,9 +151,16 @@ func (s *Server) router() http.Handler {
 // Run starts the server and blocks until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
+	ln, err := net.Listen("tcp", s.http.Addr)
+	if err != nil {
+		return err
+	}
+	// Wrap the listener so all client traffic is tallied for the live throughput
+	// widget (camera ingest is counted separately; see internal/netstat).
+	ln = netstat.Listener(ln)
 	go func() {
 		s.log.Info("http server listening", "addr", s.cfg.HTTP.Addr)
-		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()

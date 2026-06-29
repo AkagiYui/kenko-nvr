@@ -1,9 +1,18 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="kenko">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Kenko NVR</title>
+    <script>
+      // Prime data-theme before paint to avoid a flash of the wrong scheme.
+      (function () {
+        var p = localStorage.getItem("nvr_theme") || "system";
+        var dark = p === "dark" || (p === "system" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", dark ? "kenko" : "kenko-light");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

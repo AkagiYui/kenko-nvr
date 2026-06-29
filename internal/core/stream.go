@@ -14,6 +14,10 @@ type Stream struct {
 	tracks  []*Track
 	readers map[*Reader]struct{}
 	closed  bool
+
+	// bytesIn accumulates the total media payload (sum of AU lengths) written to
+	// this stream, used to compute the live ingest traffic rate.
+	bytesIn atomic.Uint64
 }
 
 // NewStream creates a Stream carrying the given tracks.
@@ -48,10 +52,18 @@ func (s *Stream) WriteUnit(u *Unit) {
 	if s.closed {
 		return
 	}
+	var n int
+	for _, au := range u.AUs {
+		n += len(au)
+	}
+	s.bytesIn.Add(uint64(n))
 	for r := range s.readers {
 		r.push(u)
 	}
 }
+
+// BytesIn returns the cumulative media payload bytes written to this stream.
+func (s *Stream) BytesIn() uint64 { return s.bytesIn.Load() }
 
 // AddReader registers a new reader with the given buffer capacity.
 func (s *Stream) AddReader(bufSize int) *Reader {
