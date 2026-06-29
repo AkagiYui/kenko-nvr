@@ -20,6 +20,11 @@ import (
 // (on top of the detector's own end debounce), so the tail of an event is kept.
 const motionPostRoll = 5 * time.Second
 
+// motionPreRoll keeps this much footage from before a motion trigger: while
+// gated off the recorder buffers recent GOPs and writes them when motion starts,
+// so the lead-up to the event is captured.
+const motionPreRoll = 5 * time.Second
+
 // camRuntime owns the lifecycle of a single camera's media pipeline.
 type camRuntime struct {
 	mgr    *Manager
@@ -357,6 +362,7 @@ func (rt *camRuntime) startConsumers(ctx context.Context, stream *core.Stream) {
 			}
 			if useGate {
 				cr.Gate = rt.motionGate
+				cr.PreRoll = motionPreRoll
 			}
 			rec = cr
 		}

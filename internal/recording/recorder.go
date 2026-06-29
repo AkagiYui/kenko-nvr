@@ -44,12 +44,25 @@ type Recorder struct {
 	// returns false no segment is written, and an open segment is closed. When
 	// nil the recorder always records (continuous mode).
 	Gate func(t time.Time) bool
-	Sink Sink
-	Log  *slog.Logger
+	// PreRoll, when > 0 alongside a Gate, makes the recorder keep a rolling
+	// buffer of the most recent GOPs while gated off; when the gate opens those
+	// GOPs are written first, so the segment includes this much footage from
+	// before the trigger (motion pre-roll). Ignored in continuous mode.
+	PreRoll time.Duration
+	// Clock returns the current wall-clock time; nil means time.Now. Injectable
+	// so tests can drive segment timing deterministically.
+	Clock func() time.Time
+	Sink  Sink
+	Log   *slog.Logger
 
 	// per-track buffering state
 	trackStates map[int]*trackBuf
 	videoTrack  *core.Track
+
+	// Pre-roll GOP ring buffer (see PreRoll) and the wall-clock time of the
+	// keyframe that opened the GOP currently accumulating in the track buffers.
+	gopCache []cachedGOP
+	gopWall  time.Time
 
 	// current file
 	writer       *mp4Writer
@@ -65,6 +78,26 @@ type sample struct {
 	isSync    bool
 	payload   []byte
 }
+
+// cachedGOP is one completed group-of-pictures held for motion pre-roll: a
+// snapshot of every track's samples, the DTS that bounds the last video frame's
+// duration, and the wall-clock time of the GOP's keyframe.
+type cachedGOP struct {
+	tracks      map[int][]sample
+	boundaryDTS int64
+	wall        time.Time
+}
+
+// now returns the current wall-clock time (overridable via Clock for tests).
+func (r *Recorder) now() time.Time {
+	if r.Clock != nil {
+		return r.Clock()
+	}
+	return time.Now()
+}
+
+// preRollEnabled reports whether pre-roll GOP buffering is active.
+func (r *Recorder) preRollEnabled() bool { return r.PreRoll > 0 && r.Gate != nil }
 
 type trackBuf struct {
 	track     *core.Track
@@ -150,24 +183,41 @@ func (r *Recorder) handleVideo(tb *trackBuf, u *core.Unit) error {
 		// at the rotation point keeps clock-aligned cuts tracking the real wall
 		// clock even if the reader is briefly behind.) Camera-supplied time is
 		// never trusted anywhere — see core.Unit.NTP.
-		now := time.Now()
+		now := r.now()
 		active := r.Gate == nil || r.Gate(now)
 
-		// Close out the previous GOP into the current file (if one is open), or
-		// discard it when recording is gated off, so buffers never grow unbounded.
+		// Close out the GOP that just ended (its samples sit in pending across all
+		// tracks): write it into the open file, stash it for pre-roll while gated
+		// off, or drop it so buffers never grow unbounded.
 		if len(tb.pending) > 0 {
-			if r.writer != nil {
+			switch {
+			case r.writer != nil:
 				if err := r.flush(dts); err != nil {
 					return err
 				}
-			} else {
+			case r.preRollEnabled():
+				r.stashGOP(dts)
+			default:
 				r.clearPending()
 			}
 		}
+		// This keyframe opens the next GOP; remember when, so it can be
+		// timestamped if it is later stashed for pre-roll.
+		r.gopWall = now
 
 		switch {
 		case active && r.writer == nil:
-			if err := r.openSegment(now); err != nil {
+			// Start a fresh segment. With buffered pre-roll, begin the file at the
+			// oldest buffered GOP and replay them first, so the recording includes
+			// the footage from just before the trigger.
+			start := now
+			if g := r.oldestGOP(); g != nil {
+				start = g.wall
+			}
+			if err := r.openSegment(start); err != nil {
+				return err
+			}
+			if err := r.writePreroll(); err != nil {
 				return err
 			}
 		case active && r.rotateDue(now):
@@ -184,13 +234,14 @@ func (r *Recorder) handleVideo(tb *trackBuf, u *core.Unit) error {
 			}
 		}
 
-		// While gated off there is no file to write into; drop this keyframe's
-		// access unit rather than buffering it.
-		if !active {
+		// Gated off without pre-roll: nothing to write into, so drop the keyframe.
+		// With pre-roll we fall through and buffer it instead.
+		if !active && !r.preRollEnabled() {
 			return nil
 		}
-	} else if r.writer == nil {
-		// Gated off (or before the first keyframe): don't buffer inter frames.
+	} else if r.writer == nil && !(r.preRollEnabled() && len(tb.pending) > 0) {
+		// Before the first keyframe, or gated off without pre-roll buffering:
+		// don't buffer inter frames.
 		return nil
 	}
 
@@ -225,7 +276,7 @@ func (r *Recorder) handleAudio(tb *trackBuf, u *core.Unit) error {
 	// When there is no video track to drive flushing, flush audio on a ~1s
 	// cadence and rotate by wall clock.
 	if r.videoTrack == nil && len(tb.pending) >= tb.track.ClockRate/aacFrameSamples {
-		now := time.Now() // server wall clock; see handleVideo
+		now := r.now() // server wall clock; see handleVideo
 		if r.writer == nil {
 			if err := r.openSegment(now); err != nil {
 				return err
@@ -243,30 +294,53 @@ func (r *Recorder) handleAudio(tb *trackBuf, u *core.Unit) error {
 	return nil
 }
 
-// flush writes one fragment containing all pending samples of every track.
-// videoBoundaryDTS is the DTS of the sample that ends the current video GOP and
-// supplies the duration of the GOP's last frame.
+// flush writes one fragment containing all pending samples of every track and
+// clears the buffers. videoBoundaryDTS is the DTS of the sample that ends the
+// current video GOP and supplies the duration of the GOP's last frame.
 func (r *Recorder) flush(videoBoundaryDTS int64) error {
 	if r.writer == nil {
 		return nil
 	}
-	var partTracks []*fmp4.PartTrack
+	perTrack := make(map[int][]sample, len(r.trackStates))
+	for id, tb := range r.trackStates {
+		if len(tb.pending) > 0 {
+			perTrack[id] = tb.pending
+		}
+	}
+	if err := r.writeFrag(perTrack, videoBoundaryDTS); err != nil {
+		return err
+	}
 	for _, tb := range r.trackStates {
-		if len(tb.pending) == 0 {
+		tb.pending = tb.pending[:0]
+	}
+	return nil
+}
+
+// writeFrag writes one fragment from the given per-track samples. It is the
+// shared core of flush (live samples) and writePreroll (buffered GOPs), and
+// advances each track's per-file timeline anchor (fileStart) on first use.
+func (r *Recorder) writeFrag(perTrack map[int][]sample, videoBoundaryDTS int64) error {
+	if r.writer == nil {
+		return nil
+	}
+	var partTracks []*fmp4.PartTrack
+	for id, samples := range perTrack {
+		if len(samples) == 0 {
 			continue
 		}
+		tb := r.trackStates[id]
 		if !tb.hasStart {
-			tb.fileStart = tb.pending[0].dts
+			tb.fileStart = samples[0].dts
 			tb.hasStart = true
 		}
 		pt := &fmp4.PartTrack{
 			ID:       tb.track.ID,
-			BaseTime: uint64(tb.pending[0].dts - tb.fileStart),
+			BaseTime: uint64(samples[0].dts - tb.fileStart),
 		}
-		for i, s := range tb.pending {
+		for i, s := range samples {
 			var dur uint32
-			if i+1 < len(tb.pending) {
-				dur = uint32(tb.pending[i+1].dts - s.dts)
+			if i+1 < len(samples) {
+				dur = uint32(samples[i+1].dts - s.dts)
 			} else if tb.isVideo {
 				dur = uint32(videoBoundaryDTS - s.dts)
 			} else {
@@ -280,7 +354,6 @@ func (r *Recorder) flush(videoBoundaryDTS int64) error {
 			})
 		}
 		partTracks = append(partTracks, pt)
-		tb.pending = tb.pending[:0]
 	}
 	return r.writer.writeFragment(partTracks)
 }
@@ -293,9 +366,64 @@ func (r *Recorder) clearPending() {
 	}
 }
 
+// stashGOP snapshots the just-completed GOP (every track's pending samples) into
+// the pre-roll ring buffer, then prunes it to the PreRoll window. boundaryDTS is
+// the next keyframe's DTS, fixing the last video frame's duration.
+func (r *Recorder) stashGOP(boundaryDTS int64) {
+	g := cachedGOP{boundaryDTS: boundaryDTS, wall: r.gopWall, tracks: make(map[int][]sample, len(r.trackStates))}
+	for id, tb := range r.trackStates {
+		if len(tb.pending) == 0 {
+			continue
+		}
+		cp := make([]sample, len(tb.pending))
+		copy(cp, tb.pending)
+		if !tb.isVideo {
+			// Audio payloads alias the source unit's buffers; copy the bytes since
+			// the GOP may be retained for several seconds. (Video payloads are
+			// freshly marshaled by videoAVCC and are safe to retain by reference.)
+			for i := range cp {
+				b := make([]byte, len(cp[i].payload))
+				copy(b, cp[i].payload)
+				cp[i].payload = b
+			}
+		}
+		g.tracks[id] = cp
+		tb.pending = tb.pending[:0]
+	}
+	r.gopCache = append(r.gopCache, g)
+
+	// Drop the oldest GOPs while the second-oldest still covers the window start,
+	// keeping just enough to reach back ~PreRoll before the newest keyframe.
+	newest := r.gopWall
+	for len(r.gopCache) >= 2 && newest.Sub(r.gopCache[1].wall) >= r.PreRoll {
+		r.gopCache = r.gopCache[1:]
+	}
+}
+
+// oldestGOP returns the oldest buffered pre-roll GOP, or nil if none.
+func (r *Recorder) oldestGOP() *cachedGOP {
+	if len(r.gopCache) == 0 {
+		return nil
+	}
+	return &r.gopCache[0]
+}
+
+// writePreroll writes every buffered pre-roll GOP into the freshly opened
+// segment (oldest first) and empties the buffer.
+func (r *Recorder) writePreroll() error {
+	for i := range r.gopCache {
+		g := &r.gopCache[i]
+		if err := r.writeFrag(g.tracks, g.boundaryDTS); err != nil {
+			return err
+		}
+	}
+	r.gopCache = nil
+	return nil
+}
+
 func (r *Recorder) openSegment(start time.Time) error {
 	if start.IsZero() {
-		start = time.Now()
+		start = r.now()
 	}
 	rel := RenderPath(r.Template, r.CameraID, r.CameraName, start)
 	abs := filepath.Join(r.Root, filepath.FromSlash(rel))
@@ -368,7 +496,7 @@ func (r *Recorder) finalize() error {
 		r.Log.Error("closing recording", "err", err)
 	}
 
-	end := time.Now()
+	end := r.now()
 	durationMS := r.fileDurationMS()
 	if r.Sink != nil && r.recordingID != "" {
 		if err := r.Sink.SegmentFinalized(r.recordingID, end, durationMS, size); err != nil && r.Log != nil {
