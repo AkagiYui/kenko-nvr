@@ -79,7 +79,7 @@ func (rt *camRuntime) onMotionStart(t time.Time) {
 		ID:        id,
 		CameraID:  rt.camera.ID,
 		Type:      database.EventMotion,
-		StartTime: t,
+		StartTime: database.MS(t),
 	})
 	if rt.mgr.log != nil {
 		rt.mgr.log.Info("motion started", "camera", rt.camera.ID)

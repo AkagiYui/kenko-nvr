@@ -65,9 +65,9 @@ func TestRetentionByAge(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	fs := seed(t, root, []database.Recording{
-		{ID: "old1", Path: "c/old1.mp4", StartTime: now.AddDate(0, 0, -40), SizeBytes: 100, Complete: true},
-		{ID: "old2", Path: "c/old2.mp4", StartTime: now.AddDate(0, 0, -31), SizeBytes: 100, Complete: true},
-		{ID: "new1", Path: "c/new1.mp4", StartTime: now.AddDate(0, 0, -5), SizeBytes: 100, Complete: true},
+		{ID: "old1", Path: "c/old1.mp4", StartTime: database.MS(now.AddDate(0, 0, -40)), SizeBytes: 100, Complete: true},
+		{ID: "old2", Path: "c/old2.mp4", StartTime: database.MS(now.AddDate(0, 0, -31)), SizeBytes: 100, Complete: true},
+		{ID: "new1", Path: "c/new1.mp4", StartTime: database.MS(now.AddDate(0, 0, -5)), SizeBytes: 100, Complete: true},
 	})
 	r := &Retention{Root: root, Store: fs}
 
@@ -92,9 +92,9 @@ func TestRetentionByTotalSize(t *testing.T) {
 	now := time.Now()
 	oneGB := int64(gib)
 	fs := seed(t, root, []database.Recording{
-		{ID: "a", Path: "a.mp4", StartTime: now.Add(-3 * time.Hour), SizeBytes: oneGB, Complete: true},
-		{ID: "b", Path: "b.mp4", StartTime: now.Add(-2 * time.Hour), SizeBytes: oneGB, Complete: true},
-		{ID: "c", Path: "c.mp4", StartTime: now.Add(-1 * time.Hour), SizeBytes: oneGB, Complete: true},
+		{ID: "a", Path: "a.mp4", StartTime: database.MS(now.Add(-3 * time.Hour)), SizeBytes: oneGB, Complete: true},
+		{ID: "b", Path: "b.mp4", StartTime: database.MS(now.Add(-2 * time.Hour)), SizeBytes: oneGB, Complete: true},
+		{ID: "c", Path: "c.mp4", StartTime: database.MS(now.Add(-1 * time.Hour)), SizeBytes: oneGB, Complete: true},
 	})
 	r := &Retention{Root: root, Store: fs}
 
@@ -115,9 +115,9 @@ func TestRetentionByFreeSpace(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	fs := seed(t, root, []database.Recording{
-		{ID: "a", Path: "a.mp4", StartTime: now.Add(-3 * time.Hour), SizeBytes: gib, Complete: true},
-		{ID: "b", Path: "b.mp4", StartTime: now.Add(-2 * time.Hour), SizeBytes: gib, Complete: true},
-		{ID: "c", Path: "c.mp4", StartTime: now.Add(-1 * time.Hour), SizeBytes: gib, Complete: true},
+		{ID: "a", Path: "a.mp4", StartTime: database.MS(now.Add(-3 * time.Hour)), SizeBytes: gib, Complete: true},
+		{ID: "b", Path: "b.mp4", StartTime: database.MS(now.Add(-2 * time.Hour)), SizeBytes: gib, Complete: true},
+		{ID: "c", Path: "c.mp4", StartTime: database.MS(now.Add(-1 * time.Hour)), SizeBytes: gib, Complete: true},
 	})
 	startTotal := fs.totalSize
 	freeStart := uint64(2 * gib) // below a 4GB floor
@@ -146,8 +146,8 @@ func TestRetentionDeleteAfterUploadOnly(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	fs := seed(t, root, []database.Recording{
-		{ID: "notup", Path: "notup.mp4", StartTime: now.AddDate(0, 0, -40), SizeBytes: 100, Complete: true, Uploaded: false},
-		{ID: "up", Path: "up.mp4", StartTime: now.AddDate(0, 0, -39), SizeBytes: 100, Complete: true, Uploaded: true},
+		{ID: "notup", Path: "notup.mp4", StartTime: database.MS(now.AddDate(0, 0, -40)), SizeBytes: 100, Complete: true, Uploaded: false},
+		{ID: "up", Path: "up.mp4", StartTime: database.MS(now.AddDate(0, 0, -39)), SizeBytes: 100, Complete: true, Uploaded: true},
 	})
 	r := &Retention{Root: root, Store: fs}
 

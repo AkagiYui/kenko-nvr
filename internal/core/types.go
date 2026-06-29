@@ -63,7 +63,10 @@ type Unit struct {
 	TrackID int
 	// PTS is the presentation timestamp in the track's ClockRate units.
 	PTS int64
-	// NTP is the wall-clock time of the unit, used by HLS and recordings.
+	// NTP is the server's wall-clock time when the unit was received, used by
+	// HLS (program-date-time) and recordings. Every source stamps it from the
+	// local clock (time.Now()); a camera-supplied time (e.g. RTCP sender-report
+	// NTP) is never trusted, because device clocks are frequently wrong.
 	NTP time.Time
 	// RandomAccess marks an IDR/keyframe (video) usable as a segment boundary.
 	RandomAccess bool

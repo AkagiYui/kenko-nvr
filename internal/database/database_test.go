@@ -78,7 +78,7 @@ func TestRecordingLifecycle(t *testing.T) {
 	}
 
 	start := time.Now().Add(-time.Hour)
-	rec := Recording{ID: "r1", CameraID: "c", Path: "c/r1.mp4", StartTime: start}
+	rec := Recording{ID: "r1", CameraID: "c", Path: "c/r1.mp4", StartTime: MS(start)}
 	if err := db.Recordings.Create(rec); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestRecordingFilterAndCascade(t *testing.T) {
 	for i, camID := range []string{"a", "a", "b"} {
 		db.Recordings.Create(Recording{
 			ID: string(rune('x' + i)), CameraID: camID,
-			Path: camID + ".mp4", StartTime: base.Add(time.Duration(i) * time.Minute),
+			Path: camID + ".mp4", StartTime: MS(base.Add(time.Duration(i) * time.Minute)),
 		})
 	}
 

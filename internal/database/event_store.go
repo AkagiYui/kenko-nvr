@@ -25,14 +25,14 @@ type EventFilter struct {
 // Create inserts a new event.
 func (s *EventStore) Create(e Event) error {
 	if e.CreatedAt.IsZero() {
-		e.CreatedAt = time.Now()
+		e.CreatedAt = MS(time.Now())
 	}
 	if e.Type == "" {
 		e.Type = EventMotion
 	}
 	_, err := s.db.Exec(`INSERT INTO events (`+eventColumns+`) VALUES (?,?,?,?,?,?,?)`,
-		e.ID, e.CameraID, string(e.Type), timeToMS(e.StartTime), timeToMS(e.EndTime),
-		e.Score, timeToMS(e.CreatedAt))
+		e.ID, e.CameraID, string(e.Type), timeToMS(e.StartTime.Time), timeToMS(e.EndTime.Time),
+		e.Score, timeToMS(e.CreatedAt.Time))
 	return err
 }
 
@@ -105,9 +105,9 @@ func scanEvent(sc scanner) (Event, error) {
 		return Event{}, err
 	}
 	e.Type = EventType(typ)
-	e.StartTime = msToTime(startMS)
-	e.EndTime = msToTime(endMS)
-	e.CreatedAt = msToTime(createdMS)
+	e.StartTime = MS(msToTime(startMS))
+	e.EndTime = MS(msToTime(endMS))
+	e.CreatedAt = MS(msToTime(createdMS))
 	return e, nil
 }
 
@@ -121,12 +121,12 @@ type PushStore struct {
 // Upsert stores (or refreshes) a subscription keyed by endpoint.
 func (s *PushStore) Upsert(p PushSubscription) error {
 	if p.CreatedAt.IsZero() {
-		p.CreatedAt = time.Now()
+		p.CreatedAt = MS(time.Now())
 	}
 	_, err := s.db.Exec(`INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, created_at)
 		VALUES (?,?,?,?,?)
 		ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth`,
-		p.ID, p.Endpoint, p.P256dh, p.Auth, timeToMS(p.CreatedAt))
+		p.ID, p.Endpoint, p.P256dh, p.Auth, timeToMS(p.CreatedAt.Time))
 	return err
 }
 
@@ -144,7 +144,7 @@ func (s *PushStore) List() ([]PushSubscription, error) {
 		if err := rows.Scan(&p.ID, &p.Endpoint, &p.P256dh, &p.Auth, &createdMS); err != nil {
 			return nil, err
 		}
-		p.CreatedAt = msToTime(createdMS)
+		p.CreatedAt = MS(msToTime(createdMS))
 		out = append(out, p)
 	}
 	return out, rows.Err()

@@ -201,7 +201,7 @@ func (s *Source) h264Binder(medi *description.Media, f *format.H264, track *core
 			stream.WriteUnit(&core.Unit{
 				TrackID:      track.ID,
 				PTS:          pts,
-				NTP:          packetNTP(c, medi, pkt),
+				NTP:          time.Now(),
 				RandomAccess: h264.IsRandomAccess(au),
 				AUs:          au,
 			})
@@ -229,7 +229,7 @@ func (s *Source) h265Binder(medi *description.Media, f *format.H265, track *core
 			stream.WriteUnit(&core.Unit{
 				TrackID:      track.ID,
 				PTS:          pts,
-				NTP:          packetNTP(c, medi, pkt),
+				NTP:          time.Now(),
 				RandomAccess: h265.IsRandomAccess(au),
 				AUs:          au,
 			})
@@ -256,19 +256,12 @@ func (s *Source) aacBinder(medi *description.Media, f *format.MPEG4Audio, track 
 			stream.WriteUnit(&core.Unit{
 				TrackID:      track.ID,
 				PTS:          pts,
-				NTP:          packetNTP(c, medi, pkt),
+				NTP:          time.Now(),
 				RandomAccess: true,
 				AUs:          aus,
 			})
 		})
 	}
-}
-
-func packetNTP(c *gortsplib.Client, medi *description.Media, pkt *rtp.Packet) time.Time {
-	if ntp, ok := c.PacketNTP(medi, pkt); ok {
-		return ntp
-	}
-	return time.Now()
 }
 
 func (s *Source) logDecoderErr(err error) {

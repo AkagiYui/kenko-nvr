@@ -24,14 +24,14 @@ type RecordingFilter struct {
 // Create inserts a new (in-progress) recording.
 func (s *RecordingStore) Create(r Recording) error {
 	if r.CreatedAt.IsZero() {
-		r.CreatedAt = time.Now()
+		r.CreatedAt = MS(time.Now())
 	}
 	_, err := s.db.Exec(`INSERT INTO recordings (id, camera_id, path, start_time, end_time,
 		duration_ms, size_bytes, complete, uploaded, s3_key, created_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.CameraID, r.Path, timeToMS(r.StartTime), timeToMS(r.EndTime),
+		r.ID, r.CameraID, r.Path, timeToMS(r.StartTime.Time), timeToMS(r.EndTime.Time),
 		r.DurationMS, r.SizeBytes, boolToInt(r.Complete), boolToInt(r.Uploaded),
-		r.S3Key, timeToMS(r.CreatedAt))
+		r.S3Key, timeToMS(r.CreatedAt.Time))
 	return err
 }
 
@@ -176,9 +176,9 @@ func scanRecording(sc scanner) (Recording, error) {
 	if err != nil {
 		return Recording{}, err
 	}
-	r.StartTime = msToTime(startMS)
-	r.EndTime = msToTime(endMS)
-	r.CreatedAt = msToTime(createdMS)
+	r.StartTime = MS(msToTime(startMS))
+	r.EndTime = MS(msToTime(endMS))
+	r.CreatedAt = MS(msToTime(createdMS))
 	r.Complete = complete != 0
 	r.Uploaded = uploaded != 0
 	return r, nil

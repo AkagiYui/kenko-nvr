@@ -64,7 +64,7 @@ func TestEventStore(t *testing.T) {
 	}
 
 	base := time.Now().Truncate(time.Millisecond)
-	e := Event{ID: "e1", CameraID: "c", Type: EventMotion, StartTime: base}
+	e := Event{ID: "e1", CameraID: "c", Type: EventMotion, StartTime: MS(base)}
 	if err := db.Events.Create(e); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestEventStore(t *testing.T) {
 	}
 
 	// FK cascade on camera delete.
-	db.Events.Create(Event{ID: "e2", CameraID: "c", StartTime: base})
+	db.Events.Create(Event{ID: "e2", CameraID: "c", StartTime: MS(base)})
 	db.Cameras.Delete("c")
 	if got, _ := db.Events.List(EventFilter{}); len(got) != 0 {
 		t.Errorf("expected events cascade-deleted, got %d", len(got))

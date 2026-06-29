@@ -143,7 +143,15 @@ func (r *Recorder) handleVideo(tb *trackBuf, u *core.Unit) error {
 	}
 
 	if u.RandomAccess {
-		active := r.Gate == nil || r.Gate(u.NTP)
+		// Anchor segment start/rotation to the server wall clock, sampled here.
+		// finalize() takes end_time from the same clock, so start<=end always and
+		// durations stay sane; the motion gate gets a time base consistent with
+		// motionEndAt. (Units already carry server time in u.NTP, but sampling now
+		// at the rotation point keeps clock-aligned cuts tracking the real wall
+		// clock even if the reader is briefly behind.) Camera-supplied time is
+		// never trusted anywhere — see core.Unit.NTP.
+		now := time.Now()
+		active := r.Gate == nil || r.Gate(now)
 
 		// Close out the previous GOP into the current file (if one is open), or
 		// discard it when recording is gated off, so buffers never grow unbounded.
@@ -159,14 +167,14 @@ func (r *Recorder) handleVideo(tb *trackBuf, u *core.Unit) error {
 
 		switch {
 		case active && r.writer == nil:
-			if err := r.openSegment(u.NTP); err != nil {
+			if err := r.openSegment(now); err != nil {
 				return err
 			}
-		case active && r.rotateDue(u.NTP):
+		case active && r.rotateDue(now):
 			if err := r.finalize(); err != nil {
 				return err
 			}
-			if err := r.openSegment(u.NTP); err != nil {
+			if err := r.openSegment(now); err != nil {
 				return err
 			}
 		case !active && r.writer != nil:
@@ -217,15 +225,16 @@ func (r *Recorder) handleAudio(tb *trackBuf, u *core.Unit) error {
 	// When there is no video track to drive flushing, flush audio on a ~1s
 	// cadence and rotate by wall clock.
 	if r.videoTrack == nil && len(tb.pending) >= tb.track.ClockRate/aacFrameSamples {
+		now := time.Now() // server wall clock; see handleVideo
 		if r.writer == nil {
-			if err := r.openSegment(u.NTP); err != nil {
+			if err := r.openSegment(now); err != nil {
 				return err
 			}
-		} else if r.rotateDue(u.NTP) {
+		} else if r.rotateDue(now) {
 			if err := r.finalize(); err != nil {
 				return err
 			}
-			if err := r.openSegment(u.NTP); err != nil {
+			if err := r.openSegment(now); err != nil {
 				return err
 			}
 		}

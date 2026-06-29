@@ -65,9 +65,9 @@ func (s *UserStore) GetByUsername(username string) (User, error) {
 // Create inserts a new user.
 func (s *UserStore) Create(u User) error {
 	now := time.Now()
-	u.CreatedAt, u.UpdatedAt = now, now
+	u.CreatedAt, u.UpdatedAt = MS(now), MS(now)
 	_, err := s.db.Exec(`INSERT INTO users (`+userColumns+`) VALUES (?,?,?,?,?,?)`,
-		u.ID, u.Username, u.PasswordHash, string(u.Role), timeToMS(u.CreatedAt), timeToMS(u.UpdatedAt))
+		u.ID, u.Username, u.PasswordHash, string(u.Role), timeToMS(u.CreatedAt.Time), timeToMS(u.UpdatedAt.Time))
 	if isUniqueViolation(err) {
 		return ErrDuplicate
 	}
@@ -121,8 +121,8 @@ func scanUser(sc scanner) (User, error) {
 		return User{}, err
 	}
 	u.Role = Role(role)
-	u.CreatedAt = msToTime(createdAt)
-	u.UpdatedAt = msToTime(updatedAt)
+	u.CreatedAt = MS(msToTime(createdAt))
+	u.UpdatedAt = MS(msToTime(updatedAt))
 	return u, nil
 }
 

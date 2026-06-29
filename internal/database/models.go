@@ -1,6 +1,61 @@
 package database
 
-import "time"
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// EpochMS is a time.Time that crosses the JSON API as an absolute Unix-
+// millisecond timestamp (a number, or null when unset) instead of a
+// timezone-bearing RFC3339 string. Sending an absolute instant — never a local
+// wall-clock string — lets the frontend render every time in the viewer's own
+// timezone (see the web app's fmtTime); the server's timezone never leaks onto
+// the wire. It is stored in SQLite as the same millisecond integer (timeToMS).
+type EpochMS struct{ time.Time }
+
+// MS wraps a time.Time so it serializes as epoch milliseconds.
+func MS(t time.Time) EpochMS { return EpochMS{t} }
+
+// MarshalJSON renders the instant as epoch milliseconds, or null when unset.
+func (e EpochMS) MarshalJSON() ([]byte, error) {
+	if e.Time.IsZero() {
+		return []byte("null"), nil
+	}
+	return []byte(strconv.FormatInt(e.Time.UnixMilli(), 10)), nil
+}
+
+// UnmarshalJSON accepts epoch milliseconds (number) or null; for robustness
+// against older clients it also parses an RFC3339 string.
+func (e *EpochMS) UnmarshalJSON(data []byte) error {
+	s := strings.TrimSpace(string(data))
+	switch {
+	case s == "" || s == "null":
+		e.Time = time.Time{}
+	case s[0] == '"':
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return err
+		}
+		if str == "" {
+			e.Time = time.Time{}
+			return nil
+		}
+		t, err := time.Parse(time.RFC3339, str)
+		if err != nil {
+			return err
+		}
+		e.Time = t
+	default:
+		ms, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return err
+		}
+		e.Time = time.UnixMilli(ms)
+	}
+	return nil
+}
 
 // SourceType enumerates how a camera's media is obtained.
 type SourceType string
@@ -54,23 +109,23 @@ type Camera struct {
 	GB28181DeviceID  string `json:"gb28181DeviceId"`
 	GB28181ChannelID string `json:"gb28181ChannelId"`
 
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt EpochMS `json:"createdAt"`
+	UpdatedAt EpochMS `json:"updatedAt"`
 }
 
 // Recording is one recorded media file.
 type Recording struct {
-	ID         string    `json:"id"`
-	CameraID   string    `json:"cameraId"`
-	Path       string    `json:"path"` // relative to the recordings root
-	StartTime  time.Time `json:"startTime"`
-	EndTime    time.Time `json:"endTime"`
-	DurationMS int64     `json:"durationMs"`
-	SizeBytes  int64     `json:"sizeBytes"`
-	Complete   bool      `json:"complete"`
-	Uploaded   bool      `json:"uploaded"`
-	S3Key      string    `json:"s3Key"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID         string  `json:"id"`
+	CameraID   string  `json:"cameraId"`
+	Path       string  `json:"path"` // relative to the recordings root
+	StartTime  EpochMS `json:"startTime"`
+	EndTime    EpochMS `json:"endTime"`
+	DurationMS int64   `json:"durationMs"`
+	SizeBytes  int64   `json:"sizeBytes"`
+	Complete   bool    `json:"complete"`
+	Uploaded   bool    `json:"uploaded"`
+	S3Key      string  `json:"s3Key"`
+	CreatedAt  EpochMS `json:"createdAt"`
 }
 
 // Role enumerates a user's permission level.
@@ -98,12 +153,12 @@ func ValidRole(r Role) bool {
 
 // User is a login account.
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"` // never serialized
-	Role         Role      `json:"role"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string  `json:"id"`
+	Username     string  `json:"username"`
+	PasswordHash string  `json:"-"` // never serialized
+	Role         Role    `json:"role"`
+	CreatedAt    EpochMS `json:"createdAt"`
+	UpdatedAt    EpochMS `json:"updatedAt"`
 }
 
 // EventType enumerates the kinds of detected events.
@@ -120,19 +175,19 @@ type Event struct {
 	ID        string    `json:"id"`
 	CameraID  string    `json:"cameraId"`
 	Type      EventType `json:"type"`
-	StartTime time.Time `json:"startTime"`
-	EndTime   time.Time `json:"endTime"`
+	StartTime EpochMS   `json:"startTime"`
+	EndTime   EpochMS   `json:"endTime"`
 	Score     float64   `json:"score"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt EpochMS   `json:"createdAt"`
 }
 
 // PushSubscription is a stored Web Push (browser) subscription.
 type PushSubscription struct {
-	ID        string    `json:"id"`
-	Endpoint  string    `json:"endpoint"`
-	P256dh    string    `json:"p256dh"`
-	Auth      string    `json:"auth"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        string  `json:"id"`
+	Endpoint  string  `json:"endpoint"`
+	P256dh    string  `json:"p256dh"`
+	Auth      string  `json:"auth"`
+	CreatedAt EpochMS `json:"createdAt"`
 }
 
 // NotificationConfig controls alert delivery. Stored as JSON under the

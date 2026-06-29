@@ -74,7 +74,7 @@ func (s *CameraStore) Get(id string) (Camera, error) {
 // Create inserts a new camera.
 func (s *CameraStore) Create(c Camera) error {
 	now := time.Now()
-	c.CreatedAt, c.UpdatedAt = now, now
+	c.CreatedAt, c.UpdatedAt = MS(now), MS(now)
 	_, err := s.db.Exec(`INSERT INTO cameras (id, name, enabled, source_type, url, username,
 		password, transport, record, onvif_enabled, onvif_xaddr, onvif_username, onvif_password,
 		onvif_profile, motion_enabled, record_mode, motion_sensitivity,
@@ -83,13 +83,13 @@ func (s *CameraStore) Create(c Camera) error {
 		c.ID, c.Name, boolToInt(c.Enabled), string(c.SourceType), c.URL, c.Username, c.Password,
 		c.Transport, boolToInt(c.Record), boolToInt(c.OnvifEnabled), c.OnvifXAddr, c.OnvifUsername,
 		c.OnvifPassword, c.OnvifProfile, boolToInt(c.MotionEnabled), c.RecordMode, c.MotionSensitivity,
-		c.GB28181DeviceID, c.GB28181ChannelID, timeToMS(c.CreatedAt), timeToMS(c.UpdatedAt))
+		c.GB28181DeviceID, c.GB28181ChannelID, timeToMS(c.CreatedAt.Time), timeToMS(c.UpdatedAt.Time))
 	return err
 }
 
 // Update modifies an existing camera.
 func (s *CameraStore) Update(c Camera) error {
-	c.UpdatedAt = time.Now()
+	c.UpdatedAt = MS(time.Now())
 	res, err := s.db.Exec(`UPDATE cameras SET name=?, enabled=?, source_type=?, url=?, username=?,
 		password=?, transport=?, record=?, onvif_enabled=?, onvif_xaddr=?, onvif_username=?,
 		onvif_password=?, onvif_profile=?, motion_enabled=?, record_mode=?, motion_sensitivity=?,
@@ -97,7 +97,7 @@ func (s *CameraStore) Update(c Camera) error {
 		c.Name, boolToInt(c.Enabled), string(c.SourceType), c.URL, c.Username, c.Password,
 		c.Transport, boolToInt(c.Record), boolToInt(c.OnvifEnabled), c.OnvifXAddr, c.OnvifUsername,
 		c.OnvifPassword, c.OnvifProfile, boolToInt(c.MotionEnabled), c.RecordMode, c.MotionSensitivity,
-		c.GB28181DeviceID, c.GB28181ChannelID, timeToMS(c.UpdatedAt), c.ID)
+		c.GB28181DeviceID, c.GB28181ChannelID, timeToMS(c.UpdatedAt.Time), c.ID)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func scanCamera(sc scanner) (Camera, error) {
 		c.RecordMode = "continuous"
 	}
 	c.SourceType = SourceType(srcType)
-	c.CreatedAt = msToTime(createdAt)
-	c.UpdatedAt = msToTime(updatedAt)
+	c.CreatedAt = MS(msToTime(createdAt))
+	c.UpdatedAt = MS(msToTime(updatedAt))
 	return c, nil
 }
