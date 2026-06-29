@@ -211,22 +211,35 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleMe returns the current user's identity and role.
+// Built-in seed account. The UI prompts the user to change it while the default
+// password is still in place (reported by handleMe as defaultPassword).
+const (
+	defaultAdminUser = "admin"
+	defaultAdminPass = "admin"
+)
+
+// handleMe returns the current user's identity and role, plus whether they are
+// still using the default password (so the UI can nag them to change it).
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	if sess == nil {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	defaultPassword := false
+	if u, err := s.db.Users.Get(sess.UserID); err == nil {
+		defaultPassword = checkPassword(u.PasswordHash, defaultAdminPass)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":       sess.UserID,
-		"username": sess.Username,
-		"role":     sess.Role,
+		"id":              sess.UserID,
+		"username":        sess.Username,
+		"role":            sess.Role,
+		"defaultPassword": defaultPassword,
 	})
 }
 
-// ensureSeedAdmin creates an initial admin account from the bootstrap config
-// when no users exist yet, so a fresh install can still log in.
+// ensureSeedAdmin creates an initial admin account when no users exist yet, so a
+// fresh install can still log in.
 func ensureSeedAdmin(db *database.DB, username, password string) error {
 	n, err := db.Users.Count()
 	if err != nil || n > 0 {

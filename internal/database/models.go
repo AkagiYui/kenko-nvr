@@ -339,6 +339,90 @@ func DefaultNotificationConfig() NotificationConfig {
 	}
 }
 
+// SystemConfig holds infrastructure settings that used to live only in the YAML
+// bootstrap file but are now editable at runtime (stored under the "system"
+// settings key, seeded from the YAML config on first run). Changing them via the
+// web UI restarts the affected servers without a process restart.
+type SystemConfig struct {
+	RTMP       RTMPSettings       `json:"rtmp"`
+	RTSP       RTSPSettings       `json:"rtsp"`
+	RTSPServer RTSPServerSettings `json:"rtspServer"`
+	WebRTC     WebRTCSettings     `json:"webrtc"`
+	GB28181    GB28181Settings    `json:"gb28181"`
+	Transcode  TranscodeSettings  `json:"transcode"`
+}
+
+// TranscodeSettings configures on-demand live transcoding (making non-H.264
+// cameras playable in the browser). Recording always archives the original
+// stream untouched; these affect the live-view path only.
+type TranscodeSettings struct {
+	// HWAccel selects the FFmpeg encoder: "auto" probes the machine and picks the
+	// best working hardware encoder (else software); "none"/"software" forces
+	// libx264; any other value names a specific encoder (e.g. h264_videotoolbox,
+	// h264_nvenc, h264_qsv, h264_vaapi), verified before use with software fallback.
+	HWAccel string `json:"hwaccel"`
+	// LiveBitrateKbps is the target bitrate (kbit/s) for transcoded live video.
+	LiveBitrateKbps int `json:"liveBitrateKbps"`
+	// LiveGOP is the keyframe interval (frames); shorter lowers join latency.
+	LiveGOP int `json:"liveGop"`
+}
+
+// DefaultSystemConfig returns the built-in defaults for the runtime
+// infrastructure config, used to seed the database on first run and as a
+// fallback. These values are hardcoded (not configurable via the YAML file).
+func DefaultSystemConfig() SystemConfig {
+	return SystemConfig{
+		RTMP:       RTMPSettings{Enabled: true, Addr: ":1935"},
+		RTSP:       RTSPSettings{Transport: "automatic"},
+		RTSPServer: RTSPServerSettings{Enabled: true, Addr: ":8554"},
+		WebRTC:     WebRTCSettings{Enabled: true},
+		GB28181: GB28181Settings{
+			Enabled:      false,
+			SIPAddr:      ":5060",
+			ServerID:     "34020000002000000001",
+			Domain:       "3402000000",
+			MediaPortMin: 30000,
+			MediaPortMax: 30500,
+		},
+		Transcode: TranscodeSettings{HWAccel: "auto", LiveBitrateKbps: 2500, LiveGOP: 50},
+	}
+}
+
+// RTMPSettings configures the embedded RTMP ingest server (push publishing).
+type RTMPSettings struct {
+	Enabled bool   `json:"enabled"`
+	Addr    string `json:"addr"`
+}
+
+// RTSPSettings configures defaults for RTSP client pulls.
+type RTSPSettings struct {
+	Transport string `json:"transport"` // "automatic" | "tcp" | "udp"
+}
+
+// RTSPServerSettings configures the RTSP re-publishing server.
+type RTSPServerSettings struct {
+	Enabled bool   `json:"enabled"`
+	Addr    string `json:"addr"`
+}
+
+// WebRTCSettings configures low-latency WebRTC live view.
+type WebRTCSettings struct {
+	Enabled     bool     `json:"enabled"`
+	STUNServers []string `json:"stunServers"`
+}
+
+// GB28181Settings configures the embedded GB/T 28181 SIP platform.
+type GB28181Settings struct {
+	Enabled      bool   `json:"enabled"`
+	SIPAddr      string `json:"sipAddr"`
+	ServerID     string `json:"serverId"`
+	Domain       string `json:"domain"`
+	Password     string `json:"password"`
+	MediaIP      string `json:"mediaIp"`
+	MediaPortMin int    `json:"mediaPortMin"`
+	MediaPortMax int    `json:"mediaPortMax"`
+}
+
 // HAConfig configures Home Assistant MQTT discovery. It publishes each camera as
 // an HA device (a motion binary_sensor plus an online/connectivity binary_sensor)
 // to the same MQTT broker configured for notifications. Stored as JSON under the

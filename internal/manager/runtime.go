@@ -170,13 +170,14 @@ func (rt *camRuntime) liveStream(ctx context.Context) (*core.Stream, func(), boo
 		return stream, func() {}, true
 	}
 
-	enc := rt.mgr.liveEncoder
+	enc := rt.mgr.liveEncoderGet()
 	if enc == nil {
 		// No FFmpeg/encoder: serve the source unchanged (better than a 503; the
 		// browser may still play it, e.g. H.265 in Safari).
 		return stream, func() {}, true
 	}
 
+	tcfg := rt.mgr.SystemConfig().Transcode
 	rt.mu.Lock()
 	if rt.liveTC == nil || rt.liveTCStream != stream {
 		if rt.liveTC != nil {
@@ -185,8 +186,8 @@ func (rt *camRuntime) liveStream(ctx context.Context) (*core.Stream, func(), boo
 		rt.liveTC = &transcode.LiveTranscoder{
 			Source:  stream,
 			Encoder: enc,
-			Bitrate: rt.mgr.cfg.Transcode.LiveBitrateKbps,
-			GOP:     rt.mgr.cfg.Transcode.LiveGOP,
+			Bitrate: tcfg.LiveBitrateKbps,
+			GOP:     tcfg.LiveGOP,
 			Log:     rt.mgr.log,
 		}
 		rt.liveTCStream = stream

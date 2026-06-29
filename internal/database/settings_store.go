@@ -14,6 +14,7 @@ const (
 	keyNotifications = "notifications"
 	keyHomeAssistant = "homeassistant"
 	keyVideoWall     = "videowall"
+	keySystem        = "system"
 )
 
 // SettingsStore persists JSON-encoded settings blobs keyed by name.
@@ -141,6 +142,19 @@ func migrateNotificationChannels(c *NotificationConfig, raw []byte) {
 // SetNotifications stores the notification config.
 func (s *SettingsStore) SetNotifications(c NotificationConfig) error {
 	return s.setJSON(keyNotifications, c)
+}
+
+// System returns the runtime infrastructure config and whether it was present
+// (false means it has never been seeded from the YAML bootstrap config).
+func (s *SettingsStore) System() (SystemConfig, bool, error) {
+	var c SystemConfig
+	ok, err := s.getJSON(keySystem, &c)
+	return c, ok, err
+}
+
+// SetSystem stores the runtime infrastructure config.
+func (s *SettingsStore) SetSystem(c SystemConfig) error {
+	return s.setJSON(keySystem, c)
 }
 
 // HomeAssistant returns the Home Assistant discovery config, or defaults if unset.

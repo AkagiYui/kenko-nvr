@@ -172,6 +172,34 @@ func TestNotificationSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSystemConfigRoundTrip(t *testing.T) {
+	db := openTest(t)
+	// Unset -> not found.
+	if _, ok, err := db.Settings.System(); ok || err != nil {
+		t.Fatalf("expected system config absent, ok=%v err=%v", ok, err)
+	}
+	want := SystemConfig{
+		RTMP:       RTMPSettings{Enabled: true, Addr: ":1936"},
+		RTSP:       RTSPSettings{Transport: "tcp"},
+		RTSPServer: RTSPServerSettings{Enabled: false, Addr: ":8554"},
+		WebRTC:     WebRTCSettings{Enabled: true, STUNServers: []string{"stun:a:1"}},
+		GB28181:    GB28181Settings{Enabled: true, SIPAddr: ":5060", Password: "sip-secret", MediaPortMin: 30000, MediaPortMax: 30500},
+	}
+	if err := db.Settings.SetSystem(want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := db.Settings.System()
+	if err != nil || !ok {
+		t.Fatalf("system config missing after set: ok=%v err=%v", ok, err)
+	}
+	if got.RTMP.Addr != ":1936" || got.RTSP.Transport != "tcp" || got.GB28181.Password != "sip-secret" {
+		t.Errorf("system round-trip mismatch: %+v", got)
+	}
+	if len(got.WebRTC.STUNServers) != 1 || got.WebRTC.STUNServers[0] != "stun:a:1" {
+		t.Errorf("stun servers not preserved: %+v", got.WebRTC.STUNServers)
+	}
+}
+
 func TestNotificationChannelSelection(t *testing.T) {
 	cfg := NotificationConfig{OnMotion: true, OnCameraOffline: false}
 	// No explicit events -> follow global flags.

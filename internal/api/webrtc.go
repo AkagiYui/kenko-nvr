@@ -13,7 +13,8 @@ import (
 // The browser POSTs its SDP offer (request body); the server replies with the
 // SDP answer and then streams H.264 video into the negotiated track.
 func (s *Server) handleWebRTC(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.WebRTC.Enabled {
+	webrtcCfg := s.mgr.SystemConfig().WebRTC
+	if !webrtcCfg.Enabled {
 		writeErr(w, http.StatusNotFound, "webrtc disabled")
 		return
 	}
@@ -31,7 +32,7 @@ func (s *Server) handleWebRTC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, err := webrtc.Offer(stream, release, string(offer), s.cfg.WebRTC.STUNServers, s.log)
+	answer, err := webrtc.Offer(stream, release, string(offer), webrtcCfg.STUNServers, s.log)
 	if err != nil {
 		release() // Offer only takes ownership of release on success
 		writeErr(w, http.StatusInternalServerError, err.Error())

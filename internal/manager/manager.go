@@ -20,7 +20,6 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/netstat"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
-	"github.com/AkagiYui/kenko-nvr/internal/rtmp"
 	"github.com/AkagiYui/kenko-nvr/internal/rtsp"
 )
 
@@ -52,38 +51,43 @@ type Manager struct {
 	ingressRate float64
 	egressRate  float64
 
-	rtmpServer *rtmp.Server
+	// Supervised network servers, (re)started by ApplySystemConfig to match the
+	// runtime SystemConfig. svcMu guards the handles.
+	svcMu   sync.Mutex
+	rtmpSvc *service
+	rtspSvc *service
+	gbSvc   *service
 
-	// liveEncoder is the FFmpeg encoder resolved at startup for transcoding
-	// non-H.264 cameras to a browser-playable live stream. nil if FFmpeg is
-	// absent (such cameras then fall back to their unmodified stream).
+	// liveEncoder is the FFmpeg encoder for transcoding non-H.264 cameras to a
+	// browser-playable live stream. nil if FFmpeg is absent (such cameras then
+	// fall back to their unmodified stream). It is (re)probed by applyTranscode
+	// when the hwaccel setting changes, so encMu guards it; encSig/encProbed
+	// (guarded by svcMu) track what it was last probed for.
+	encMu       sync.Mutex
 	liveEncoder *hwaccel.Encoder
+	encSig      string
+	encProbed   bool
 
 	// notifier delivers motion / offline alerts (nil disables notifications).
 	notifier *notify.Notifier
 
 	// gb is the GB28181 SIP platform, set when GB28181 ingest is enabled. A
-	// gb28181 camera's source invites its channel through this server.
-	gb *gb28181.Server
+	// gb28181 camera's source invites its channel through this server. It is
+	// swapped at runtime when GB28181 settings change, so gbMu guards access.
+	gbMu sync.Mutex
+	gb   *gb28181.Server
 
 	// ha publishes Home Assistant MQTT discovery; nil disables it.
 	ha *hadiscovery.Publisher
 }
 
-// SetLiveEncoder sets the encoder used for on-demand live transcoding. Call it
-// once at startup, before Start.
-func (m *Manager) SetLiveEncoder(e *hwaccel.Encoder) { m.liveEncoder = e }
-
 // SetNotifier sets the notifier used for motion / offline alerts. Call it once
 // at startup, before Start.
 func (m *Manager) SetNotifier(n *notify.Notifier) { m.notifier = n }
 
-// SetGB28181 sets the GB28181 SIP platform used by gb28181 cameras. Call it once
-// at startup, before Start.
-func (m *Manager) SetGB28181(s *gb28181.Server) { m.gb = s }
-
 // GB28181 returns the GB28181 SIP platform, or nil if GB28181 ingest is disabled.
-func (m *Manager) GB28181() *gb28181.Server { return m.gb }
+// The platform is managed by ApplySystemConfig, not set externally.
+func (m *Manager) GB28181() *gb28181.Server { return m.gb28181Server() }
 
 // SetHADiscovery sets the Home Assistant discovery publisher. Call it once at
 // startup, before Start.
@@ -137,24 +141,14 @@ func New(cfg config.Config, db *database.DB, log *slog.Logger) *Manager {
 	}
 }
 
-// Start launches the RTMP server (if enabled) and every enabled camera.
+// Start launches the supervised servers (RTMP / RTSP re-publish / GB28181) per
+// the runtime SystemConfig, then every enabled camera.
 func (m *Manager) Start(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
-	if m.cfg.RTMP.Enabled {
-		m.rtmpServer = &rtmp.Server{
-			Addr:    m.cfg.RTMP.Addr,
-			Log:     m.log,
-			Handler: m,
-		}
-		m.wg.Add(1)
-		go func() {
-			defer m.wg.Done()
-			if err := m.rtmpServer.Run(m.ctx); err != nil {
-				m.log.Error("rtmp server stopped", "err", err)
-			}
-		}()
-	}
+	// Start the network servers before cameras, so gb28181 cameras can invite
+	// their channels through a live SIP platform.
+	m.ApplySystemConfig(m.SystemConfig())
 
 	m.wg.Add(1)
 	go func() {
@@ -492,14 +486,15 @@ func (m *Manager) buildPullSource(cam database.Camera) core.Source {
 		// ONVIF resolves the RTSP stream URI dynamically, then pulls over RTSP.
 		return &onvifSource{cam: cam, transport: m.rtspTransport(cam), log: m.log}
 	case database.SourceGB28181:
-		if m.gb == nil {
+		gb := m.gb28181Server()
+		if gb == nil {
 			return nil
 		}
 		ch := cam.GB28181ChannelID
 		if ch == "" {
 			ch = cam.GB28181DeviceID
 		}
-		return &gb28181.Source{Server: m.gb, DeviceID: cam.GB28181DeviceID, ChannelID: ch}
+		return &gb28181.Source{Server: gb, DeviceID: cam.GB28181DeviceID, ChannelID: ch}
 	default:
 		return nil
 	}
@@ -509,8 +504,8 @@ func (m *Manager) rtspTransport(cam database.Camera) string {
 	if cam.Transport != "" {
 		return cam.Transport
 	}
-	if m.cfg.RTSP.Transport != "automatic" {
-		return m.cfg.RTSP.Transport
+	if t := m.SystemConfig().RTSP.Transport; t != "" && t != "automatic" {
+		return t
 	}
 	return ""
 }

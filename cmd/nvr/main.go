@@ -14,14 +14,11 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/api"
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
-	"github.com/AkagiYui/kenko-nvr/internal/gb28181"
 	"github.com/AkagiYui/kenko-nvr/internal/hadiscovery"
-	"github.com/AkagiYui/kenko-nvr/internal/hwaccel"
 	"github.com/AkagiYui/kenko-nvr/internal/logger"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
 	"github.com/AkagiYui/kenko-nvr/internal/recording"
-	"github.com/AkagiYui/kenko-nvr/internal/rtspserver"
 	"github.com/AkagiYui/kenko-nvr/internal/storage"
 )
 
@@ -60,11 +57,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Discover the live-transcode encoder for this machine (hardware if usable,
-	// else software). This probes FFmpeg once at startup; the deployer configures
-	// nothing beyond an optional override.
-	enc := hwaccel.Detect(ctx, cfg.Transcode.HWAccel, log)
-
 	// Notifier delivers motion / offline alerts to the configured channels.
 	notifier := &notify.Notifier{
 		ConfigFn: func() database.NotificationConfig {
@@ -76,32 +68,18 @@ func main() {
 	}
 	defer notifier.Close()
 
-	// Control plane: supervise cameras, ingest and consumers.
+	// Control plane: supervise cameras, ingest and consumers. The live-transcode
+	// encoder is probed by the manager from the runtime transcode settings.
 	mgr := manager.New(cfg, db, log)
-	mgr.SetLiveEncoder(enc)
 	mgr.SetNotifier(notifier)
 
-	// GB28181 SIP platform (optional): IP cameras / NVRs register here and their
-	// channels can be added as cameras of source type "gb28181".
-	if cfg.GB28181.Enabled {
-		gbSrv := gb28181.New(gb28181.Config{
-			Enabled:      true,
-			SIPAddr:      cfg.GB28181.SIPAddr,
-			ServerID:     cfg.GB28181.ServerID,
-			Domain:       cfg.GB28181.Domain,
-			Password:     cfg.GB28181.Password,
-			MediaIP:      cfg.GB28181.MediaIP,
-			MediaPortMin: cfg.GB28181.MediaPortMin,
-			MediaPortMax: cfg.GB28181.MediaPortMax,
-		}, log)
-		mgr.SetGB28181(gbSrv)
-		go func() {
-			if err := gbSrv.Run(ctx); err != nil {
-				log.Error("gb28181 server stopped", "err", err)
-			}
-		}()
-	}
+	// Seed the runtime infrastructure config (RTMP / RTSP / RTSP-server / WebRTC /
+	// GB28181) from the YAML bootstrap on first run; thereafter the database is the
+	// source of truth and these are edited live in the web UI.
+	seedSystemConfig(db, log)
 
+	// The manager owns the supervised network servers (RTMP ingest, RTSP
+	// re-publish, GB28181 SIP) and (re)starts them from the runtime config.
 	if err := mgr.Start(ctx); err != nil {
 		log.Error("failed to start manager", "err", err)
 		os.Exit(1)
@@ -118,16 +96,6 @@ func main() {
 	}
 	mgr.SetHADiscovery(haPub)
 	go haPub.Run(ctx)
-
-	// RTSP re-publishing server: external clients pull rtsp://host/<cameraID>.
-	if cfg.RTSPServer.Enabled {
-		rtspSrv := &rtspserver.Server{Addr: cfg.RTSPServer.Addr, Provider: mgr, Log: log}
-		go func() {
-			if err := rtspSrv.Run(ctx); err != nil {
-				log.Error("rtsp server stopped", "err", err)
-			}
-		}()
-	}
 
 	// Periodically prune old motion events (mirror the recordings age limit).
 	go runEventCleanup(ctx, db, log)
@@ -160,7 +128,6 @@ func main() {
 	srv := api.New(cfg, db, mgr, notifier, log)
 	log.Info("kenko-nvr started",
 		"http", cfg.HTTP.Addr,
-		"rtmp", cfg.RTMP.Addr,
 		"recordings", cfg.Storage.RecordingsDir,
 	)
 	if err := srv.Run(ctx); err != nil {
@@ -168,6 +135,18 @@ func main() {
 	}
 
 	log.Info("shutting down")
+}
+
+// seedSystemConfig writes the built-in infrastructure defaults into the database
+// the first time the server runs, so the web UI has a concrete starting point to
+// edit. On later runs the stored config wins.
+func seedSystemConfig(db *database.DB, log *slog.Logger) {
+	if _, ok, err := db.Settings.System(); ok || err != nil {
+		return
+	}
+	if err := db.Settings.SetSystem(database.DefaultSystemConfig()); err != nil {
+		log.Warn("failed to seed system config", "err", err)
+	}
 }
 
 // runEventCleanup periodically deletes motion events older than the recordings

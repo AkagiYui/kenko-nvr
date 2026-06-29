@@ -1,63 +1,22 @@
 # Kenko NVR bootstrap configuration.
 #
-# Only infrastructure-level settings live here. Cameras, retention policy,
-# recording rules and S3 upload are configured at runtime from the web UI and
-# stored in the SQLite database.
+# Only the few settings needed before the database is available live here.
+# Everything else — the web login account, cameras, recording/retention, S3,
+# notifications, live transcoding, and the RTMP / RTSP / RTSP-server / WebRTC /
+# GB28181 network services — is configured at runtime in the web UI and stored
+# in SQLite.
+#
+# The web login defaults to admin / admin; change it under Users (the UI warns
+# until you do).
 
 http:
   addr: ":8080"        # management UI + REST API + HLS live view
-  username: admin      # web login user
-  password: admin      # CHANGE THIS
-  jwt_secret: ""       # reserved for future use
-
-rtmp:
-  enabled: true        # accept RTMP push from encoders/cameras
-  addr: ":1935"        # encoders publish to rtmp://<host>:1935/live/<cameraID>
-
-rtsp:
-  transport: automatic # default RTSP lower transport: automatic | tcp | udp
-
-rtsp_server:
-  enabled: true        # re-publish live cameras over RTSP for external pull
-  addr: ":8554"        # clients pull rtsp://<host>:8554/<cameraID>
-
-webrtc:
-  enabled: true        # low-latency WebRTC live view (WHEP) in the browser
-  stun_servers: []     # e.g. ["stun:stun.l.google.com:19302"] for cross-network
-
-gb28181:
-  # Embedded GB/T 28181 SIP platform. When enabled, configure your cameras/NVRs
-  # to register to this server (server_id + domain + the host:port below), then
-  # add their channels as cameras with source type "gb28181" in the web UI.
-  enabled: false
-  sip_addr: ":5060"                    # UDP SIP signalling listen address
-  server_id: "34020000002000000001"    # 20-digit platform/server SIP ID
-  domain: "3402000000"                 # SIP domain / realm
-  password: ""                         # shared device registration password ("" = no auth)
-  media_ip: ""                         # IP advertised to devices for media (auto-detected if empty)
-  media_port_min: 30000                # UDP port range for receiving RTP/MPEG-PS media
-  media_port_max: 30500
-
-# Home Assistant (MQTT discovery) and the video wall are configured at runtime in
-# the web UI (System Settings), not here. HA discovery reuses the notifications
-# MQTT broker.
+  jwt_secret: ""       # signs session tokens; empty = random per start (sessions
+                       # do not survive a restart). Set a fixed value to persist.
 
 storage:
   recordings_dir: ./data/recordings
   db_path: ./data/nvr.db
-
-transcode:
-  # On-demand live transcoding makes non-H.264 cameras (e.g. H.265) playable in
-  # the browser. Recording always archives the ORIGINAL stream untouched; this
-  # affects live view only. One shared FFmpeg process serves all viewers of a
-  # camera and runs only while someone is watching.
-  hwaccel: auto              # auto (probe & pick a working HW encoder, else
-                             # software) | none/software | a specific encoder
-                             # name (e.g. h264_videotoolbox, h264_nvenc,
-                             # h264_qsv, h264_vaapi). "auto" needs no tuning:
-                             # the encoder is verified at startup per machine.
-  live_bitrate_kbps: 2500    # target bitrate for transcoded live video
-  live_gop: 50               # keyframe interval in frames (≈2s at 25fps)
 
 log:
   level: info          # debug | info | warn | error

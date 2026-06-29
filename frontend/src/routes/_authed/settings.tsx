@@ -1,8 +1,16 @@
 import { createFileRoute } from "@tanstack/solid-router";
 import { createResource, createSignal, Show, type JSX } from "solid-js";
+import { createStore, unwrap } from "solid-js/store";
 import { api } from "~/lib/api";
 import { toast } from "~/components/toast";
-import type { GB28181Info, HAConfig, RecordingConfig, RetentionPolicy, S3Config } from "~/lib/types";
+import type {
+  GB28181Info,
+  HAConfig,
+  RecordingConfig,
+  RetentionPolicy,
+  S3Config,
+  SystemConfig,
+} from "~/lib/types";
 
 export const Route = createFileRoute("/_authed/settings")({
   component: Settings,
@@ -13,6 +21,7 @@ function Settings() {
     <>
       <h1 class="text-[22px] font-semibold mb-5">系统设置</h1>
       <div class="grid gap-4">
+        <SystemCard />
         <RecordingCard />
         <RetentionCard />
         <S3Card />
@@ -57,6 +66,227 @@ function Labeled(props: { label: string; hint?: string; class?: string; children
       </label>
       {props.children}
     </div>
+  );
+}
+
+// ---- System / network services (runtime-editable) ----
+
+function SystemCard() {
+  const [data] = createResource<SystemConfig>(() => api("/settings/system"));
+  return (
+    <Show
+      when={data()}
+      fallback={
+        <Card title="网络服务（运行时）">
+          <div class="text-base-content/60">加载中…</div>
+        </Card>
+      }
+    >
+      {(c) => <SystemForm initial={c()} />}
+    </Show>
+  );
+}
+
+function SystemForm(props: { initial: SystemConfig }) {
+  const [conf, setConf] = createStore<SystemConfig>(props.initial);
+  const [stun, setStun] = createSignal((props.initial.webrtc.stunServers ?? []).join("\n"));
+
+  const save = async () => {
+    const payload: SystemConfig = JSON.parse(JSON.stringify(unwrap(conf)));
+    payload.webrtc.stunServers = stun()
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      await api("/settings/system", { method: "PUT", body: payload });
+      toast("已保存并应用（相关服务已按需重启）");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+
+  return (
+    <Card title="网络服务（运行时可改，保存即生效）">
+      <p class="text-[13px] text-base-content/50">
+        修改后无需重启进程，会自动重启对应服务。Web 登录账号请在「用户管理」中修改。
+      </p>
+
+      <div class="divider my-0 text-xs">RTMP 推流接入</div>
+      <Check
+        checked={conf.rtmp.enabled}
+        onChange={(v) => setConf("rtmp", "enabled", v)}
+        label="启用 RTMP 接入（编码器/摄像头推流到本机）"
+      />
+      <Labeled label="监听地址" class="max-w-[220px]">
+        <input
+          class="input input-bordered w-full"
+          placeholder=":1935"
+          value={conf.rtmp.addr}
+          onInput={(e) => setConf("rtmp", "addr", e.currentTarget.value)}
+        />
+      </Labeled>
+
+      <div class="divider my-0 text-xs">RTSP 拉流默认传输</div>
+      <Labeled label="默认传输方式" class="max-w-[220px]">
+        <select
+          class="select select-bordered w-full"
+          value={conf.rtsp.transport}
+          onChange={(e) => setConf("rtsp", "transport", e.currentTarget.value)}
+        >
+          <option value="automatic">自动</option>
+          <option value="tcp">TCP</option>
+          <option value="udp">UDP</option>
+        </select>
+      </Labeled>
+
+      <div class="divider my-0 text-xs">RTSP 转发服务</div>
+      <Check
+        checked={conf.rtspServer.enabled}
+        onChange={(v) => setConf("rtspServer", "enabled", v)}
+        label="启用 RTSP 转发（外部可拉 rtsp://本机:addr/<cameraID>）"
+      />
+      <Labeled label="监听地址" class="max-w-[220px]">
+        <input
+          class="input input-bordered w-full"
+          placeholder=":8554"
+          value={conf.rtspServer.addr}
+          onInput={(e) => setConf("rtspServer", "addr", e.currentTarget.value)}
+        />
+      </Labeled>
+
+      <div class="divider my-0 text-xs">WebRTC 低延迟直播</div>
+      <Check
+        checked={conf.webrtc.enabled}
+        onChange={(v) => setConf("webrtc", "enabled", v)}
+        label="启用 WebRTC（WHEP）直播"
+      />
+      <Labeled label="STUN 服务器（每行一个，跨网络访问时用）" hint="如 stun:stun.l.google.com:19302">
+        <textarea
+          class="textarea textarea-bordered w-full"
+          rows="2"
+          value={stun()}
+          onInput={(e) => setStun(e.currentTarget.value)}
+        />
+      </Labeled>
+
+      <div class="divider my-0 text-xs">直播转码</div>
+      <p class="text-[13px] text-base-content/50">
+        把非 H.264（如 H.265）摄像头实时转码成浏览器可直接播放的画面，仅影响“直播”路径；
+        录像始终保存原始码流、不受影响。每台摄像头共用一个 FFmpeg 进程，且仅在有人观看时运行。
+        改动对“新开始”的转码生效，正在播放的会话会在重连后采用新设置。
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <Labeled
+          label="硬件加速 / 编码器"
+          hint="auto 自动探测可用硬件编码，失败回退软件"
+          class="flex-1 min-w-[220px]"
+        >
+          <input
+            class="input input-bordered w-full"
+            placeholder="auto"
+            value={conf.transcode.hwaccel}
+            onInput={(e) => setConf("transcode", "hwaccel", e.currentTarget.value)}
+          />
+        </Labeled>
+      </div>
+      <p class="text-[12px] text-base-content/40 -mt-1">
+        可填：<code>auto</code>（推荐）、<code>none</code>/<code>software</code>（强制软件 libx264）、
+        或具体编码器名如 <code>h264_videotoolbox</code>（macOS）、<code>h264_nvenc</code>（NVIDIA）、
+        <code>h264_qsv</code>（Intel）、<code>h264_vaapi</code>（Linux）。无效名会自动回退软件。
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <Labeled label="直播码率（kbit/s）" class="flex-1 min-w-[160px]">
+          <input
+            type="number"
+            class="input input-bordered w-full"
+            value={conf.transcode.liveBitrateKbps}
+            onInput={(e) => setConf("transcode", "liveBitrateKbps", parseInt(e.currentTarget.value, 10) || 0)}
+          />
+        </Labeled>
+        <Labeled label="关键帧间隔 GOP（帧）" hint="越小起播越快；25fps 下 50≈2 秒" class="flex-1 min-w-[160px]">
+          <input
+            type="number"
+            class="input input-bordered w-full"
+            value={conf.transcode.liveGop}
+            onInput={(e) => setConf("transcode", "liveGop", parseInt(e.currentTarget.value, 10) || 0)}
+          />
+        </Labeled>
+      </div>
+
+      <div class="divider my-0 text-xs">GB28181 国标接入</div>
+      <Check
+        checked={conf.gb28181.enabled}
+        onChange={(v) => setConf("gb28181", "enabled", v)}
+        label="启用 GB28181 SIP 平台"
+      />
+      <div class="flex gap-3 flex-wrap">
+        <Labeled label="SIP 监听地址" class="flex-1 min-w-[140px]">
+          <input
+            class="input input-bordered w-full"
+            placeholder=":5060"
+            value={conf.gb28181.sipAddr}
+            onInput={(e) => setConf("gb28181", "sipAddr", e.currentTarget.value)}
+          />
+        </Labeled>
+        <Labeled label="平台编号 server_id" class="flex-1 min-w-[180px]">
+          <input
+            class="input input-bordered w-full"
+            value={conf.gb28181.serverId}
+            onInput={(e) => setConf("gb28181", "serverId", e.currentTarget.value)}
+          />
+        </Labeled>
+      </div>
+      <div class="flex gap-3 flex-wrap">
+        <Labeled label="SIP 域 domain" class="flex-1 min-w-[140px]">
+          <input
+            class="input input-bordered w-full"
+            value={conf.gb28181.domain}
+            onInput={(e) => setConf("gb28181", "domain", e.currentTarget.value)}
+          />
+        </Labeled>
+        <Labeled label="注册密码" class="flex-1 min-w-[140px]">
+          <input
+            type="password"
+            class="input input-bordered w-full"
+            placeholder="留空表示不修改"
+            value={conf.gb28181.password}
+            onInput={(e) => setConf("gb28181", "password", e.currentTarget.value)}
+          />
+        </Labeled>
+      </div>
+      <div class="flex gap-3 flex-wrap">
+        <Labeled label="媒体 IP（留空自动探测）" class="flex-1 min-w-[140px]">
+          <input
+            class="input input-bordered w-full"
+            value={conf.gb28181.mediaIp}
+            onInput={(e) => setConf("gb28181", "mediaIp", e.currentTarget.value)}
+          />
+        </Labeled>
+        <Labeled label="媒体端口范围">
+          <div class="flex items-center gap-1">
+            <input
+              type="number"
+              class="input input-bordered w-[100px]"
+              value={conf.gb28181.mediaPortMin}
+              onInput={(e) => setConf("gb28181", "mediaPortMin", parseInt(e.currentTarget.value, 10) || 0)}
+            />
+            <span>-</span>
+            <input
+              type="number"
+              class="input input-bordered w-[100px]"
+              value={conf.gb28181.mediaPortMax}
+              onInput={(e) => setConf("gb28181", "mediaPortMax", parseInt(e.currentTarget.value, 10) || 0)}
+            />
+          </div>
+        </Labeled>
+      </div>
+
+      <div>
+        <button class="btn btn-primary" onClick={() => void save()}>
+          保存并应用
+        </button>
+      </div>
+    </Card>
   );
 }
 
@@ -248,8 +478,8 @@ function GB28181Card() {
             when={info().enabled}
             fallback={
               <p class="text-sm text-base-content/60">
-                未启用。在 <code>config.yaml</code> 中设置 <code>gb28181.enabled: true</code> 并重启后，
-                把设备/NVR 的国标参数指向本服务即可接入。
+                未启用。在上方「网络服务」中启用 <code>GB28181</code> 并保存即可（无需重启），
+                再把设备/NVR 的国标参数指向本服务接入。
               </p>
             }
           >

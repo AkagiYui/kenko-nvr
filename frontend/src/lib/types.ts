@@ -98,6 +98,9 @@ export interface Me {
   id: string;
   username: string;
   role: Role;
+  // defaultPassword is true while the account still uses the built-in default
+  // password ("admin"), so the UI can prompt the user to change it.
+  defaultPassword?: boolean;
 }
 
 // SystemStats is the aggregate dashboard footer payload from GET /api/stats.
@@ -198,6 +201,53 @@ export interface NotificationConfig {
   minIntervalSeconds: number;
   channels: NotificationChannel[];
   webPush: WebPushConfig; // global VAPID keys (publicKey only on the client)
+}
+
+// --- Runtime infrastructure settings (GET/PUT /settings/system) ---
+
+export interface RTMPSettings {
+  enabled: boolean;
+  addr: string;
+}
+
+export interface RTSPSettings {
+  transport: string; // "automatic" | "tcp" | "udp"
+}
+
+export interface RTSPServerSettings {
+  enabled: boolean;
+  addr: string;
+}
+
+export interface WebRTCSettings {
+  enabled: boolean;
+  stunServers: string[];
+}
+
+export interface GB28181Settings {
+  enabled: boolean;
+  sipAddr: string;
+  serverId: string;
+  domain: string;
+  password: string;
+  mediaIp: string;
+  mediaPortMin: number;
+  mediaPortMax: number;
+}
+
+export interface TranscodeSettings {
+  hwaccel: string; // "auto" | "none"/"software" | a specific encoder name
+  liveBitrateKbps: number;
+  liveGop: number;
+}
+
+export interface SystemConfig {
+  rtmp: RTMPSettings;
+  rtsp: RTSPSettings;
+  rtspServer: RTSPServerSettings;
+  webrtc: WebRTCSettings;
+  gb28181: GB28181Settings;
+  transcode: TranscodeSettings;
 }
 
 export interface OnvifDevice {

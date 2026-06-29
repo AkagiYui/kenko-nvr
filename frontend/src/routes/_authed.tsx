@@ -4,7 +4,7 @@ import { Icon } from "@iconify-icon/solid";
 import { api, getRole, getUsername, isAdmin, isAuthed, logout } from "~/lib/api";
 import { getThemePref, setThemePref, type ThemePref } from "~/lib/theme";
 import { fmtRate } from "~/lib/format";
-import type { SystemStats } from "~/lib/types";
+import type { Me, SystemStats } from "~/lib/types";
 
 export const Route = createFileRoute("/_authed")({
   beforeLoad: () => {
@@ -62,6 +62,14 @@ function AuthedLayout() {
     };
     document.addEventListener("click", onDocClick);
     onCleanup(() => document.removeEventListener("click", onDocClick));
+  });
+
+  // Nag the user while the account still uses the built-in default password.
+  const [defaultPw, setDefaultPw] = createSignal(false);
+  onMount(() => {
+    void api<Me>("/me")
+      .then((me) => setDefaultPw(!!me.defaultPassword))
+      .catch(() => {});
   });
 
   // Poll system-wide stats for the live traffic / camera widget.
@@ -222,6 +230,19 @@ function AuthedLayout() {
       </aside>
 
       <main class="flex-1 overflow-auto p-7">
+        <Show when={defaultPw()}>
+          <div class="alert alert-warning mb-5">
+            <Icon icon="lucide:shield-alert" width="20" height="20" />
+            <span>
+              当前正在使用默认密码（admin），存在安全风险，请尽快修改。
+            </span>
+            <Show when={isAdmin()}>
+              <Link to="/users" class="btn btn-sm">
+                去修改
+              </Link>
+            </Show>
+          </div>
+        </Show>
         <Outlet />
       </main>
     </div>

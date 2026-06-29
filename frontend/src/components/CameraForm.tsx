@@ -213,7 +213,7 @@ export function CameraForm(props: Props) {
               when={gbInfo()?.enabled}
               fallback={
                 <p class="text-sm text-error">
-                  GB28181 服务未启用。请在 config.yaml 中设置 <code>gb28181.enabled: true</code> 并重启。
+                  GB28181 服务未启用。请在「系统设置 → 网络服务」中启用 GB28181 并保存（无需重启）。
                 </p>
               }
             >

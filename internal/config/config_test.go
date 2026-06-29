@@ -48,11 +48,7 @@ func TestLoadParsesOverrides(t *testing.T) {
 	yaml := `
 http:
   addr: "127.0.0.1:9999"
-  username: bob
-  password: hunter2
-rtmp:
-  enabled: false
-  addr: ":1936"
+  jwt_secret: s3cr3t
 storage:
   recordings_dir: /data/rec
   db_path: /data/nvr.db
@@ -66,11 +62,8 @@ log:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.HTTP.Addr != "127.0.0.1:9999" || c.HTTP.Username != "bob" {
+	if c.HTTP.Addr != "127.0.0.1:9999" || c.HTTP.JWTSecret != "s3cr3t" {
 		t.Errorf("http override not applied: %+v", c.HTTP)
-	}
-	if c.RTMP.Enabled {
-		t.Error("rtmp.enabled override not applied")
 	}
 	if c.Storage.RecordingsDir != "/data/rec" {
 		t.Errorf("storage override not applied: %q", c.Storage.RecordingsDir)

@@ -34,8 +34,9 @@ type Server struct {
 
 // New creates the API server.
 func New(cfg config.Config, db *database.DB, mgr *manager.Manager, notifier *notify.Notifier, log *slog.Logger) *Server {
-	// Seed the first admin from bootstrap config so a fresh install can log in.
-	if err := ensureSeedAdmin(db, cfg.HTTP.Username, cfg.HTTP.Password); err != nil {
+	// Seed the built-in admin/admin account so a fresh install can log in; the
+	// UI nags until the default password is changed (see handleMe).
+	if err := ensureSeedAdmin(db, defaultAdminUser, defaultAdminPass); err != nil {
 		log.Error("failed to seed admin user", "err", err)
 	}
 	s := &Server{
@@ -110,6 +111,9 @@ func (s *Server) router() http.Handler {
 				r.Post("/users", s.handleCreateUser)
 				r.Put("/users/{id}", s.handleUpdateUser)
 				r.Delete("/users/{id}", s.handleDeleteUser)
+
+				r.Get("/settings/system", s.handleGetSystem)
+				r.Put("/settings/system", s.handleSetSystem)
 
 				r.Get("/settings/retention", s.handleGetRetention)
 				r.Put("/settings/retention", s.handleSetRetention)
