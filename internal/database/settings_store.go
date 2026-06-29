@@ -82,11 +82,60 @@ func (s *SettingsStore) SetRecording(c RecordingConfig) error {
 	return s.setJSON(keyRecording, c)
 }
 
-// Notifications returns the notification config, or defaults if unset.
+// Notifications returns the notification config, or defaults if unset. A config
+// stored in the pre-channels format is migrated to a channel list on read.
 func (s *SettingsStore) Notifications() (NotificationConfig, error) {
 	c := DefaultNotificationConfig()
-	_, err := s.getJSON(keyNotifications, &c)
-	return c, err
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, keyNotifications).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, nil
+	}
+	if err != nil {
+		return c, err
+	}
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return c, err
+	}
+	migrateNotificationChannels(&c, []byte(raw))
+	return c, nil
+}
+
+// migrateNotificationChannels converts a legacy config (single email/webhook/
+// mqtt/webPush blocks, no channels) into the channel list, once.
+func migrateNotificationChannels(c *NotificationConfig, raw []byte) {
+	if len(c.Channels) > 0 {
+		return
+	}
+	var legacy struct {
+		Email   EmailConfig   `json:"email"`
+		Webhook WebhookConfig `json:"webhook"`
+		MQTT    MQTTConfig    `json:"mqtt"`
+		WebPush WebPushConfig `json:"webPush"`
+	}
+	if err := json.Unmarshal(raw, &legacy); err != nil {
+		return
+	}
+	if legacy.Email.Host != "" {
+		c.Channels = append(c.Channels, NotificationChannel{
+			ID: "legacy-email", Name: "邮件", Type: ChannelEmail, Enabled: legacy.Email.Enabled, Email: legacy.Email,
+		})
+	}
+	if legacy.Webhook.URL != "" {
+		c.Channels = append(c.Channels, NotificationChannel{
+			ID: "legacy-webhook", Name: "Webhook", Type: ChannelWebhook, Enabled: legacy.Webhook.Enabled, Webhook: legacy.Webhook,
+		})
+	}
+	if legacy.MQTT.BrokerURL != "" {
+		c.Channels = append(c.Channels, NotificationChannel{
+			ID: "legacy-mqtt", Name: "MQTT", Type: ChannelMQTT, Enabled: legacy.MQTT.Enabled, MQTT: legacy.MQTT,
+		})
+	}
+	if legacy.WebPush.Enabled {
+		c.Channels = append(c.Channels, NotificationChannel{
+			ID: "legacy-webpush", Name: "浏览器推送", Type: ChannelWebPush, Enabled: true, Subject: legacy.WebPush.Subject,
+		})
+	}
 }
 
 // SetNotifications stores the notification config.

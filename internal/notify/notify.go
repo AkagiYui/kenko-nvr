@@ -42,10 +42,10 @@ type Notifier struct {
 	mqtt     *mqttConn            // cached MQTT connection (lazy)
 }
 
-// Notify delivers n to all enabled channels, honouring the per-camera+kind
-// throttle. It returns quickly; delivery happens synchronously per channel but
-// each channel failure is logged and isolated. Call from a goroutine if the
-// caller must not block.
+// Notify delivers msg to every enabled channel that handles its kind, honouring
+// the per-camera+kind throttle. It returns quickly; delivery happens
+// synchronously per channel but each channel failure is logged and isolated.
+// Call from a goroutine if the caller must not block.
 func (n *Notifier) Notify(ctx context.Context, msg Notification) {
 	cfg := n.config()
 	if !cfg.Enabled {
@@ -54,28 +54,57 @@ func (n *Notifier) Notify(ctx context.Context, msg Notification) {
 	if msg.Time.IsZero() {
 		msg.Time = time.Now()
 	}
+
+	// Resolve the channels that want this kind before consuming the throttle, so
+	// a suppressed kind does not eat the next allowed notification's window.
+	var targets []database.NotificationChannel
+	for _, ch := range cfg.Channels {
+		if ch.Enabled && ch.WantsKind(msg.Kind, cfg) {
+			targets = append(targets, ch)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
 	if !n.allow(msg, cfg.MinIntervalSeconds) {
 		return
 	}
 
-	if cfg.Email.Enabled {
-		if err := sendEmail(cfg.Email, msg); err != nil {
-			n.logErr("email", err)
+	for _, ch := range targets {
+		if err := n.deliver(ctx, cfg, ch, msg); err != nil {
+			n.logErr(channelLabel(ch), err)
 		}
 	}
-	if cfg.Webhook.Enabled {
-		if err := sendWebhook(ctx, cfg.Webhook, msg); err != nil {
-			n.logErr("webhook", err)
+}
+
+// deliver dispatches msg through one channel according to its type.
+func (n *Notifier) deliver(ctx context.Context, cfg database.NotificationConfig, ch database.NotificationChannel, msg Notification) error {
+	switch ch.Type {
+	case database.ChannelEmail:
+		return sendEmail(ch.Email, msg)
+	case database.ChannelWebhook:
+		return sendWebhook(ctx, ch.Webhook, msg)
+	case database.ChannelMQTT:
+		return n.publishMQTT(ch.MQTT, msg)
+	case database.ChannelWebPush:
+		if n.Push == nil {
+			return fmt.Errorf("web push not available")
 		}
-	}
-	if cfg.MQTT.Enabled {
-		if err := n.publishMQTT(cfg.MQTT, msg); err != nil {
-			n.logErr("mqtt", err)
+		wp := cfg.WebPush
+		if ch.Subject != "" {
+			wp.Subject = ch.Subject
 		}
+		return n.sendWebPushErr(wp, msg)
+	default:
+		return fmt.Errorf("unknown channel type %q", ch.Type)
 	}
-	if cfg.WebPush.Enabled && n.Push != nil {
-		n.sendWebPush(cfg.WebPush, msg)
+}
+
+func channelLabel(ch database.NotificationChannel) string {
+	if ch.Name != "" {
+		return string(ch.Type) + ":" + ch.Name
 	}
+	return string(ch.Type)
 }
 
 func (n *Notifier) config() database.NotificationConfig {
@@ -127,43 +156,19 @@ func (n *Notifier) Close() {
 	}
 }
 
-// TestChannels delivers a synthetic notification using the supplied config,
-// returning the first error per enabled channel. Used by the settings "test"
-// button so the user gets immediate feedback.
-func (n *Notifier) TestChannels(ctx context.Context, cfg database.NotificationConfig) error {
-	msg := Notification{
+// testMessage is the synthetic notification used by the settings "test" button.
+func testMessage() Notification {
+	return Notification{
 		Kind:       "test",
 		CameraName: "测试",
 		Title:      "Kenko NVR 通知测试",
 		Body:       "如果你收到这条消息，说明通知渠道配置正确。",
 		Time:       time.Now(),
 	}
-	var firstErr error
-	record := func(err error) {
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if cfg.Email.Enabled {
-		record(sendEmail(cfg.Email, msg))
-	}
-	if cfg.Webhook.Enabled {
-		record(sendWebhook(ctx, cfg.Webhook, msg))
-	}
-	if cfg.MQTT.Enabled {
-		record(n.publishMQTT(cfg.MQTT, msg))
-	}
-	if cfg.WebPush.Enabled && n.Push != nil {
-		if err := n.sendWebPushErr(cfg.WebPush, msg); err != nil {
-			record(err)
-		}
-	}
-	if firstErr == nil && !anyEnabled(cfg) {
-		return fmt.Errorf("没有启用任何通知渠道")
-	}
-	return firstErr
 }
 
-func anyEnabled(cfg database.NotificationConfig) bool {
-	return cfg.Email.Enabled || cfg.Webhook.Enabled || cfg.MQTT.Enabled || cfg.WebPush.Enabled
+// TestChannel delivers a synthetic notification through one channel (regardless
+// of its enabled flag), so the user gets immediate feedback while configuring it.
+func (n *Notifier) TestChannel(ctx context.Context, cfg database.NotificationConfig, ch database.NotificationChannel) error {
+	return n.deliver(ctx, cfg, ch, testMessage())
 }

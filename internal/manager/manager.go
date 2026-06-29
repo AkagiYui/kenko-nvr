@@ -455,25 +455,15 @@ func (m *Manager) OnPublishStop(streamKey string) {
 	}
 }
 
-// notify delivers a notification asynchronously, gated by the per-kind settings
-// flags, if a notifier is configured.
+// notify delivers a notification asynchronously if a notifier is configured.
+// Per-kind gating and channel selection now happen inside the notifier (each
+// channel chooses its own event kinds, defaulting to the global flags).
 func (m *Manager) notify(n notify.Notification) {
 	if m.notifier == nil {
 		return
 	}
-	cfg, _ := m.db.Settings.Notifications()
-	if !cfg.Enabled {
+	if cfg, _ := m.db.Settings.Notifications(); !cfg.Enabled {
 		return
-	}
-	switch n.Kind {
-	case "motion":
-		if !cfg.OnMotion {
-			return
-		}
-	case "offline":
-		if !cfg.OnCameraOffline {
-			return
-		}
 	}
 	go m.notifier.Notify(context.Background(), n)
 }

@@ -152,15 +152,69 @@ func TestNotificationSettingsRoundTrip(t *testing.T) {
 	}
 	want := DefaultNotificationConfig()
 	want.Enabled = true
-	want.Email.Enabled = true
-	want.Email.Host = "smtp.example.com"
 	want.WebPush.PublicKey = "pub"
 	want.WebPush.PrivateKey = "priv"
+	want.Channels = []NotificationChannel{
+		{ID: "c1", Name: "邮件", Type: ChannelEmail, Enabled: true,
+			Email: EmailConfig{Host: "smtp.example.com", Port: 587}},
+		{ID: "c2", Name: "Webhook", Type: ChannelWebhook, Enabled: true, Events: []string{NotifyKindOffline},
+			Webhook: WebhookConfig{URL: "https://x/hook"}},
+	}
 	if err := db.Settings.SetNotifications(want); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := db.Settings.Notifications()
-	if !got.Enabled || got.Email.Host != "smtp.example.com" || got.WebPush.PrivateKey != "priv" {
-		t.Errorf("notification round-trip failed: %+v", got)
+	if !got.Enabled || len(got.Channels) != 2 || got.WebPush.PrivateKey != "priv" {
+		t.Fatalf("notification round-trip failed: %+v", got)
+	}
+	if got.Channels[0].Email.Host != "smtp.example.com" || got.Channels[1].Webhook.URL != "https://x/hook" {
+		t.Errorf("channel configs not preserved: %+v", got.Channels)
+	}
+}
+
+func TestNotificationChannelSelection(t *testing.T) {
+	cfg := NotificationConfig{OnMotion: true, OnCameraOffline: false}
+	// No explicit events -> follow global flags.
+	follow := NotificationChannel{Type: ChannelEmail}
+	if !follow.WantsKind(NotifyKindMotion, cfg) {
+		t.Error("default channel should follow global OnMotion=true")
+	}
+	if follow.WantsKind(NotifyKindOffline, cfg) {
+		t.Error("default channel should follow global OnCameraOffline=false")
+	}
+	// Explicit events override the global flags (even when global is off).
+	override := NotificationChannel{Type: ChannelEmail, Events: []string{NotifyKindOffline}}
+	if override.WantsKind(NotifyKindMotion, cfg) {
+		t.Error("explicit-events channel should not deliver unlisted kinds")
+	}
+	if !override.WantsKind(NotifyKindOffline, cfg) {
+		t.Error("explicit-events channel should deliver its listed kind despite global off")
+	}
+}
+
+func TestNotificationLegacyMigration(t *testing.T) {
+	db := openTest(t)
+	// Write a pre-channels config blob directly.
+	legacy := `{"enabled":true,"onMotion":true,"email":{"enabled":true,"host":"smtp.x","port":465},` +
+		`"mqtt":{"enabled":false,"brokerURL":"tcp://b:1883"},"webPush":{"enabled":true,"subject":"mailto:a@b"}}`
+	if _, err := db.SQL().Exec(`INSERT INTO settings(key,value) VALUES('notifications',?)`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.Settings.Notifications()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Channels) != 3 {
+		t.Fatalf("expected 3 migrated channels (email, mqtt, webpush), got %d: %+v", len(got.Channels), got.Channels)
+	}
+	byType := map[ChannelType]NotificationChannel{}
+	for _, ch := range got.Channels {
+		byType[ch.Type] = ch
+	}
+	if byType[ChannelEmail].Email.Host != "smtp.x" || !byType[ChannelEmail].Enabled {
+		t.Errorf("email channel not migrated: %+v", byType[ChannelEmail])
+	}
+	if mq, ok := got.FirstMQTT(); !ok || mq.BrokerURL != "tcp://b:1883" {
+		t.Errorf("FirstMQTT did not find migrated broker: %v %+v", ok, mq)
 	}
 }

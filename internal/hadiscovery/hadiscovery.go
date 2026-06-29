@@ -133,11 +133,12 @@ func (p *Publisher) snapshot() (database.HAConfig, database.MQTTConfig, bool) {
 		ha.BaseTopic = "kenko-nvr"
 	}
 	nc, err := p.DB.Settings.Notifications()
-	if err != nil || nc.MQTT.BrokerURL == "" {
+	mq, ok := nc.FirstMQTT()
+	if err != nil || !ok {
 		p.warnOnce("home assistant discovery enabled but notifications MQTT broker is not configured")
 		return ha, database.MQTTConfig{}, false
 	}
-	return ha, nc.MQTT, true
+	return ha, mq, true
 }
 
 func (p *Publisher) warnOnce(msg string) {

@@ -190,8 +190,26 @@ type PushSubscription struct {
 	CreatedAt EpochMS `json:"createdAt"`
 }
 
+// Notification event kinds a channel can subscribe to.
+const (
+	NotifyKindMotion  = "motion"
+	NotifyKindOffline = "offline"
+)
+
+// ChannelType identifies a notification channel's delivery method.
+type ChannelType string
+
+const (
+	ChannelEmail   ChannelType = "email"
+	ChannelWebhook ChannelType = "webhook"
+	ChannelMQTT    ChannelType = "mqtt"
+	ChannelWebPush ChannelType = "webpush"
+)
+
 // NotificationConfig controls alert delivery. Stored as JSON under the
-// "notifications" settings key.
+// "notifications" settings key. Delivery fans out to an arbitrary list of
+// Channels; the top-level OnMotion/OnCameraOffline flags are the default set of
+// event kinds a channel delivers when it does not pick its own.
 type NotificationConfig struct {
 	Enabled bool `json:"enabled"`
 	// OnMotion fires a notification when motion starts on a camera.
@@ -201,10 +219,75 @@ type NotificationConfig struct {
 	// MinIntervalSeconds throttles repeat notifications per camera+kind.
 	MinIntervalSeconds int `json:"minIntervalSeconds"`
 
+	// Channels is the user-defined list of delivery channels.
+	Channels []NotificationChannel `json:"channels"`
+
+	// WebPush holds the global VAPID keypair shared by every webpush channel and
+	// all browser subscriptions; individual channels only carry a Subject.
+	WebPush WebPushConfig `json:"webPush"`
+}
+
+// NotificationChannel is one delivery target: a method (Type) plus its config
+// and the event kinds it handles.
+type NotificationChannel struct {
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Type    ChannelType `json:"type"`
+	Enabled bool        `json:"enabled"`
+	// Events restricts which notification kinds this channel delivers. Empty
+	// means follow the global defaults (OnMotion / OnCameraOffline).
+	Events []string `json:"events"`
+
+	// Only the field matching Type is used.
 	Email   EmailConfig   `json:"email"`
 	Webhook WebhookConfig `json:"webhook"`
 	MQTT    MQTTConfig    `json:"mqtt"`
-	WebPush WebPushConfig `json:"webPush"`
+	// Subject is the webpush per-channel VAPID subject (mailto: or https URL).
+	Subject string `json:"subject"`
+}
+
+// WantsKind reports whether this channel should deliver the given event kind,
+// given the global defaults to fall back on when the channel selects nothing.
+func (ch NotificationChannel) WantsKind(kind string, cfg NotificationConfig) bool {
+	if len(ch.Events) > 0 {
+		for _, e := range ch.Events {
+			if e == kind {
+				return true
+			}
+		}
+		return false
+	}
+	switch kind {
+	case NotifyKindMotion:
+		return cfg.OnMotion
+	case NotifyKindOffline:
+		return cfg.OnCameraOffline
+	default:
+		return true // synthetic kinds (e.g. "test") always pass the default gate
+	}
+}
+
+// FirstMQTT returns the config of the first MQTT channel (preferring an enabled,
+// configured one) and whether one exists. Home Assistant discovery shares this
+// broker, so it reads the MQTT settings through here.
+func (c NotificationConfig) FirstMQTT() (MQTTConfig, bool) {
+	var fallback *MQTTConfig
+	for i := range c.Channels {
+		ch := &c.Channels[i]
+		if ch.Type != ChannelMQTT || ch.MQTT.BrokerURL == "" {
+			continue
+		}
+		if ch.Enabled {
+			return ch.MQTT, true
+		}
+		if fallback == nil {
+			fallback = &ch.MQTT
+		}
+	}
+	if fallback != nil {
+		return *fallback, true
+	}
+	return MQTTConfig{}, false
 }
 
 // EmailConfig configures SMTP email alerts.
@@ -244,15 +327,14 @@ type WebPushConfig struct {
 	PrivateKey string `json:"privateKey"` // base64url VAPID private key (server-only)
 }
 
-// DefaultNotificationConfig returns a disabled default notification config.
+// DefaultNotificationConfig returns a disabled default notification config with
+// no channels.
 func DefaultNotificationConfig() NotificationConfig {
 	return NotificationConfig{
 		Enabled:            false,
 		OnMotion:           true,
 		OnCameraOffline:    true,
 		MinIntervalSeconds: 60,
-		Email:              EmailConfig{Port: 587, UseTLS: true},
-		MQTT:               MQTTConfig{Topic: "kenko-nvr/events", ClientID: "kenko-nvr"},
 		WebPush:            WebPushConfig{Subject: "mailto:admin@example.com"},
 	}
 }

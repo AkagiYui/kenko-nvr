@@ -12,10 +12,26 @@ import (
 
 // redactNotifications blanks write-only secrets before sending config to the UI.
 func redactNotifications(c database.NotificationConfig) database.NotificationConfig {
-	c.Email.Password = ""
-	c.MQTT.Password = ""
+	// Copy the channel slice so blanking does not mutate the caller's array.
+	chans := make([]database.NotificationChannel, len(c.Channels))
+	copy(chans, c.Channels)
+	for i := range chans {
+		chans[i].Email.Password = ""
+		chans[i].MQTT.Password = ""
+	}
+	c.Channels = chans
 	c.WebPush.PrivateKey = "" // never leaves the server
 	return c
+}
+
+// anyWebPushChannel reports whether any channel uses browser push.
+func anyWebPushChannel(c database.NotificationConfig) bool {
+	for _, ch := range c.Channels {
+		if ch.Type == database.ChannelWebPush {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleGetNotifications(w http.ResponseWriter, r *http.Request) {
@@ -36,8 +52,8 @@ func (s *Server) handleSetNotifications(w http.ResponseWriter, r *http.Request) 
 	existing, _ := s.db.Settings.Notifications()
 	mergeNotificationSecrets(&in, existing)
 
-	// Generate a VAPID keypair the first time Web Push is enabled.
-	if in.WebPush.Enabled && (in.WebPush.PublicKey == "" || in.WebPush.PrivateKey == "") {
+	// Generate the global VAPID keypair the first time a webpush channel exists.
+	if anyWebPushChannel(in) && (in.WebPush.PublicKey == "" || in.WebPush.PrivateKey == "") {
 		priv, pub, err := webpush.GenerateVAPIDKeys()
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "generating VAPID keys: "+err.Error())
@@ -54,19 +70,32 @@ func (s *Server) handleSetNotifications(w http.ResponseWriter, r *http.Request) 
 }
 
 // mergeNotificationSecrets keeps stored secrets when the client submits blanks
-// (it never receives them), mirroring the S3 settings behaviour.
+// (it never receives them). Channel secrets are matched by channel ID; the VAPID
+// keypair is global and always carried forward.
 func mergeNotificationSecrets(in *database.NotificationConfig, existing database.NotificationConfig) {
-	if in.Email.Password == "" {
-		in.Email.Password = existing.Email.Password
+	byID := make(map[string]database.NotificationChannel, len(existing.Channels))
+	for _, ch := range existing.Channels {
+		byID[ch.ID] = ch
 	}
-	if in.MQTT.Password == "" {
-		in.MQTT.Password = existing.MQTT.Password
+	for i := range in.Channels {
+		ch := &in.Channels[i]
+		old, ok := byID[ch.ID]
+		if !ok {
+			continue
+		}
+		if ch.Email.Password == "" {
+			ch.Email.Password = old.Email.Password
+		}
+		if ch.MQTT.Password == "" {
+			ch.MQTT.Password = old.MQTT.Password
+		}
 	}
-	// VAPID keys are managed server-side; always carry them forward.
 	in.WebPush.PublicKey = existing.WebPush.PublicKey
 	in.WebPush.PrivateKey = existing.WebPush.PrivateKey
 }
 
+// handleTestNotification fires a synthetic notification through one channel
+// (identified by ?channelId=), or through every enabled channel if none is given.
 func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
 	var in database.NotificationConfig
 	if err := decodeJSON(r, &in); err != nil {
@@ -75,9 +104,39 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 	}
 	existing, _ := s.db.Settings.Notifications()
 	mergeNotificationSecrets(&in, existing)
-	in.Enabled = true // a test should fire even if global delivery is off
-	if err := s.notifier.TestChannels(r.Context(), in); err != nil {
-		writeErr(w, http.StatusBadGateway, err.Error())
+
+	if id := r.URL.Query().Get("channelId"); id != "" {
+		for _, ch := range in.Channels {
+			if ch.ID == id {
+				if err := s.notifier.TestChannel(r.Context(), in, ch); err != nil {
+					writeErr(w, http.StatusBadGateway, err.Error())
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+				return
+			}
+		}
+		writeErr(w, http.StatusBadRequest, "channel not found")
+		return
+	}
+
+	var firstErr error
+	tested := 0
+	for _, ch := range in.Channels {
+		if !ch.Enabled {
+			continue
+		}
+		tested++
+		if err := s.notifier.TestChannel(r.Context(), in, ch); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if tested == 0 {
+		writeErr(w, http.StatusBadGateway, "没有启用任何通知渠道")
+		return
+	}
+	if firstErr != nil {
+		writeErr(w, http.StatusBadGateway, firstErr.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

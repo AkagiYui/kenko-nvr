@@ -175,15 +175,29 @@ export interface WebPushConfig {
   publicKey?: string;
 }
 
+export type ChannelType = "email" | "webhook" | "mqtt" | "webpush";
+
+// NotificationChannel is one delivery target. Only the config field matching
+// `type` is used. `events` empty means "follow the global onMotion/onCameraOffline".
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  type: ChannelType;
+  enabled: boolean;
+  events: string[]; // "motion" | "offline"
+  email: EmailConfig;
+  webhook: WebhookConfig;
+  mqtt: MQTTConfig;
+  subject: string; // webpush per-channel VAPID subject
+}
+
 export interface NotificationConfig {
   enabled: boolean;
   onMotion: boolean;
   onCameraOffline: boolean;
   minIntervalSeconds: number;
-  email: EmailConfig;
-  webhook: WebhookConfig;
-  mqtt: MQTTConfig;
-  webPush: WebPushConfig;
+  channels: NotificationChannel[];
+  webPush: WebPushConfig; // global VAPID keys (publicKey only on the client)
 }
 
 export interface OnvifDevice {
