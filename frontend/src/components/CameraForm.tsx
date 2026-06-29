@@ -8,6 +8,7 @@ import type {
   GB28181Device,
   GB28181Info,
   OnvifProbeResult,
+  OnvifProfile,
   SourceType,
 } from "~/lib/types";
 
@@ -41,6 +42,10 @@ export function CameraForm(props: Props) {
   const [onvifUsername, setOnvifUsername] = createSignal(c?.onvifUsername ?? seed.onvifUsername ?? "");
   const [onvifPassword, setOnvifPassword] = createSignal("");
   const [onvifProfile, setOnvifProfile] = createSignal(c?.onvifProfile ?? seed.onvifProfile ?? "");
+  // Profiles discovered by the last ONVIF probe; the token can be picked from
+  // these or typed manually (custom mode).
+  const [profiles, setProfiles] = createSignal<OnvifProfile[]>([]);
+  const [profileCustom, setProfileCustom] = createSignal(false);
   const [probing, setProbing] = createSignal(false);
   const [gbDeviceId, setGbDeviceId] = createSignal(c?.gb28181DeviceId ?? seed.gb28181DeviceId ?? "");
   const [gbChannelId, setGbChannelId] = createSignal(c?.gb28181ChannelId ?? seed.gb28181ChannelId ?? "");
@@ -86,15 +91,17 @@ export function CameraForm(props: Props) {
         method: "POST",
         body: { xaddr: onvifXAddr(), username: onvifUsername(), password: onvifPassword() },
       });
-      const p = res.profiles?.[0];
-      if (!p) return toast("未发现 profile", "error");
-      if (p.streamUri) {
-        setUrl(p.streamUri);
-        setOnvifProfile(p.token);
-        toast(`已填入 RTSP 地址（${res.info?.manufacturer ?? ""} ${res.info?.model ?? ""}）`);
-      } else {
-        toast("已连接，但未获取到 RTSP 地址", "error");
-      }
+      const ps = res.profiles ?? [];
+      setProfiles(ps);
+      if (ps.length === 0) return toast("未发现 profile", "error");
+      // If the saved token isn't one of the discovered profiles, keep it as a
+      // manual entry; otherwise resolve the stream for the selected/first one.
+      const matched = ps.find((p) => p.token === onvifProfile());
+      setProfileCustom(!!onvifProfile() && !matched);
+      const chosen = matched ?? ps[0];
+      if (!matched) setOnvifProfile(chosen.token);
+      if (chosen.streamUri) setUrl(chosen.streamUri);
+      toast(`发现 ${ps.length} 个 profile（${res.info?.manufacturer ?? ""} ${res.info?.model ?? ""}）`);
     } catch (e) {
       toast((e as Error).message, "error");
     } finally {
@@ -351,11 +358,57 @@ export function CameraForm(props: Props) {
                 />
               </Field>
             </div>
-            <Field label="Profile Token" hint="留空则自动使用第一个">
-              <input class="input input-bordered w-full" value={onvifProfile()} onInput={(e) => setOnvifProfile(e.currentTarget.value)} />
+            <Field label="Profile Token" hint="探测后可下拉选择，或选“自定义”手动填写；留空用第一个">
+              <Show
+                when={profiles().length > 0}
+                fallback={
+                  <input
+                    class="input input-bordered w-full"
+                    placeholder="留空则自动使用第一个"
+                    value={onvifProfile()}
+                    onInput={(e) => setOnvifProfile(e.currentTarget.value)}
+                  />
+                }
+              >
+                <select
+                  class="select select-bordered w-full"
+                  value={
+                    profileCustom()
+                      ? "__custom__"
+                      : profiles().some((p) => p.token === onvifProfile())
+                        ? onvifProfile()
+                        : ""
+                  }
+                  onChange={(e) => {
+                    const v = e.currentTarget.value;
+                    if (v === "__custom__") {
+                      setProfileCustom(true);
+                      return;
+                    }
+                    setProfileCustom(false);
+                    setOnvifProfile(v);
+                    const p = profiles().find((p) => p.token === v);
+                    if (p?.streamUri) setUrl(p.streamUri);
+                  }}
+                >
+                  <option value="">（自动：使用第一个）</option>
+                  <For each={profiles()}>
+                    {(p) => <option value={p.token}>{(p.name ? p.name + " · " : "") + p.token}</option>}
+                  </For>
+                  <option value="__custom__">自定义（手动输入）…</option>
+                </select>
+                <Show when={profileCustom()}>
+                  <input
+                    class="input input-bordered w-full mt-1.5"
+                    placeholder="输入 Profile Token"
+                    value={onvifProfile()}
+                    onInput={(e) => setOnvifProfile(e.currentTarget.value)}
+                  />
+                </Show>
+              </Show>
             </Field>
             <button class="btn btn-sm btn-ghost mt-2" disabled={probing()} onClick={() => void probe()}>
-              探测 ONVIF（获取 RTSP 地址）
+              探测 ONVIF（获取 RTSP 地址 / Profile）
             </button>
           </div>
         </Show>

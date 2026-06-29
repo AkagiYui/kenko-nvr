@@ -206,6 +206,7 @@ export interface OnvifDevice {
 
 export interface OnvifProfile {
   token: string;
+  name?: string;
   streamUri?: string;
 }
 
