@@ -30,6 +30,9 @@ type Server struct {
 	auth     *authenticator
 	notifier *notify.Notifier
 	http     *http.Server
+	// archive opens recordings that were uploaded to S3 and then removed locally,
+	// so they can be streamed back through the NVR. A field so tests can stub it.
+	archive recordingArchive
 }
 
 // New creates the API server.
@@ -46,6 +49,7 @@ func New(cfg config.Config, db *database.DB, mgr *manager.Manager, notifier *not
 		log:      log,
 		auth:     newAuthenticator(db.Users),
 		notifier: notifier,
+		archive:  s3Archive{settings: db.Settings},
 	}
 	s.http = &http.Server{
 		Addr:              cfg.HTTP.Addr,

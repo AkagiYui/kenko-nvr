@@ -85,6 +85,14 @@ var migrations = []string{
 	// --- v11: GB28181 device/channel binding --------------------------------
 	`ALTER TABLE cameras ADD COLUMN gb28181_device_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE cameras ADD COLUMN gb28181_channel_id TEXT NOT NULL DEFAULT ''`,
+
+	// --- v12: cloud-only recordings -----------------------------------------
+	// local_removed marks a recording whose local file has been deleted (by
+	// retention or the upload worker) but which is preserved on S3 and remains
+	// playable by streaming it back through the NVR. The row is kept so the clip
+	// stays discoverable; it is excluded from local-disk size accounting and from
+	// the retention worker's deletion candidates.
+	`ALTER TABLE recordings ADD COLUMN local_removed INTEGER NOT NULL DEFAULT 0`,
 }
 
 func (d *DB) migrate() error {

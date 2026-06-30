@@ -5,6 +5,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -87,6 +88,36 @@ func (u *Uploader) Upload(ctx context.Context, localPath, key string) error {
 		return fmt.Errorf("uploading %q: %w", key, err)
 	}
 	return nil
+}
+
+// Object is a readable, seekable handle to an S3 object plus its size and
+// modification time. Body supports HTTP range requests (minio issues a ranged
+// GET on the first read after a seek), so it can be passed straight to
+// http.ServeContent for scrubbable playback. Callers must Close it.
+type Object struct {
+	Body    io.ReadSeekCloser
+	Size    int64
+	ModTime time.Time
+}
+
+// Close releases the underlying object handle.
+func (o *Object) Close() error { return o.Body.Close() }
+
+// Open returns a handle to the object at key for streaming back to a client.
+// This is the read side of Upload: it lets recordings that were uploaded and
+// then deleted locally be played by proxying them through the NVR, so clients
+// with no direct internet/S3 access can still watch archived footage.
+func (u *Uploader) Open(ctx context.Context, key string) (*Object, error) {
+	obj, err := u.client.GetObject(ctx, u.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get object %q: %w", key, err)
+	}
+	info, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		return nil, fmt.Errorf("stat object %q: %w", key, err)
+	}
+	return &Object{Body: obj, Size: info.Size, ModTime: info.LastModified}, nil
 }
 
 // CheckBucket verifies the bucket is reachable and exists. Useful for the

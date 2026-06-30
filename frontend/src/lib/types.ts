@@ -71,6 +71,10 @@ export interface Recording {
   durationMs?: number;
   sizeBytes?: number;
   uploaded?: boolean;
+  // localRemoved is true when the local file has been deleted but the clip is
+  // preserved on S3; it still plays (streamed back through the NVR) and is shown
+  // with a cloud-only indicator.
+  localRemoved?: boolean;
   complete?: boolean;
 }
 

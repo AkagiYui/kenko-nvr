@@ -125,7 +125,12 @@ type Recording struct {
 	Complete   bool    `json:"complete"`
 	Uploaded   bool    `json:"uploaded"`
 	S3Key      string  `json:"s3Key"`
-	CreatedAt  EpochMS `json:"createdAt"`
+	// LocalRemoved is true when the local file has been deleted but the recording
+	// is preserved on S3 (Uploaded && S3Key set). Such a clip stays listed and is
+	// played by streaming it back from S3 through the NVR; it no longer counts
+	// toward local-disk usage.
+	LocalRemoved bool    `json:"localRemoved"`
+	CreatedAt    EpochMS `json:"createdAt"`
 }
 
 // Role enumerates a user's permission level.

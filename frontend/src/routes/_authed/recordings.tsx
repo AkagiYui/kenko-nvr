@@ -128,8 +128,14 @@ function Recordings() {
                     <td>{fmtDur(r.durationMs)}</td>
                     <td>{fmtSize(r.sizeBytes)}</td>
                     <td>
-                      <Show when={r.uploaded} fallback="—">
-                        <span class="badge badge-success">已上传</span>
+                      <Show when={r.localRemoved} fallback={
+                        <Show when={r.uploaded} fallback="—">
+                          <span class="badge badge-success">已上传</span>
+                        </Show>
+                      }>
+                        <span class="badge badge-info" title="本地文件已按规则删除，从 S3 流式回放">
+                          仅云端
+                        </span>
                       </Show>
                     </td>
                     <td class="text-right whitespace-nowrap">

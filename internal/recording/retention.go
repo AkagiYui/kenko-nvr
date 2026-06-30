@@ -15,6 +15,9 @@ type RetentionStore interface {
 	OldestComplete(limit int, onlyUploaded bool) ([]database.Recording, error)
 	TotalSize() (int64, error)
 	Delete(id string) error
+	// MarkLocalRemoved keeps the row but flags the local file as deleted, used
+	// when a recording is preserved on S3.
+	MarkLocalRemoved(id string) error
 }
 
 // Retention enforces rolling deletion of recordings by age, total size and free
@@ -75,7 +78,7 @@ func (r *Retention) Enforce(policy database.RetentionPolicy, s3Enabled bool) (in
 			if rec.StartTime.After(cutoff) {
 				break // OldestComplete is ascending; the rest are newer
 			}
-			if err := r.delete(rec); err != nil {
+			if err := r.delete(rec, s3Enabled); err != nil {
 				return deleted, err
 			}
 			deleted++
@@ -85,7 +88,7 @@ func (r *Retention) Enforce(policy database.RetentionPolicy, s3Enabled bool) (in
 	// 2) Total-size cap.
 	if policy.MaxTotalSizeGB > 0 {
 		limit := int64(policy.MaxTotalSizeGB * gib)
-		n, err := r.deleteUntil(onlyUploaded, func() (bool, error) {
+		n, err := r.deleteUntil(onlyUploaded, s3Enabled, func() (bool, error) {
 			total, err := r.Store.TotalSize()
 			if err != nil {
 				return false, err
@@ -101,7 +104,7 @@ func (r *Retention) Enforce(policy database.RetentionPolicy, s3Enabled bool) (in
 	// 3) Free-space floor.
 	if policy.MinFreeSpaceGB > 0 {
 		floor := uint64(policy.MinFreeSpaceGB * gib)
-		n, err := r.deleteUntil(onlyUploaded, func() (bool, error) {
+		n, err := r.deleteUntil(onlyUploaded, s3Enabled, func() (bool, error) {
 			free, _, err := r.DiskUsage(r.Root)
 			if err != nil {
 				return false, err
@@ -118,7 +121,7 @@ func (r *Retention) Enforce(policy database.RetentionPolicy, s3Enabled bool) (in
 }
 
 // deleteUntil deletes oldest recordings one at a time while need() is true.
-func (r *Retention) deleteUntil(onlyUploaded bool, need func() (bool, error)) (int, error) {
+func (r *Retention) deleteUntil(onlyUploaded, s3Enabled bool, need func() (bool, error)) (int, error) {
 	deleted := 0
 	for {
 		over, err := need()
@@ -135,19 +138,26 @@ func (r *Retention) deleteUntil(onlyUploaded bool, need func() (bool, error)) (i
 		if len(recs) == 0 {
 			return deleted, nil // nothing left we are allowed to delete
 		}
-		if err := r.delete(recs[0]); err != nil {
+		if err := r.delete(recs[0], s3Enabled); err != nil {
 			return deleted, err
 		}
 		deleted++
 	}
 }
 
-func (r *Retention) delete(rec database.Recording) error {
+// delete frees a recording's local file. When the recording is already archived
+// to S3 (and S3 is enabled) the database row is kept and only flagged
+// local_removed, so the clip stays listed and remains playable by streaming it
+// back from S3 through the NVR. Otherwise the row is removed entirely.
+func (r *Retention) delete(rec database.Recording, s3Enabled bool) error {
 	abs := filepath.Join(r.Root, filepath.FromSlash(rec.Path))
 	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	removeEmptyParents(r.Root, filepath.Dir(abs))
+	if s3Enabled && rec.Uploaded && rec.S3Key != "" {
+		return r.Store.MarkLocalRemoved(rec.ID)
+	}
 	return r.Store.Delete(rec.ID)
 }
 

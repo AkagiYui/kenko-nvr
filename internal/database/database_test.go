@@ -118,6 +118,23 @@ func TestRecordingLifecycle(t *testing.T) {
 	if len(oldUploaded) != 1 {
 		t.Errorf("expected uploaded recording in OldestComplete(onlyUploaded), got %d", len(oldUploaded))
 	}
+
+	// After the local file is freed (kept only on S3), the row stays but is
+	// excluded from disk accounting and retention candidates, while remaining
+	// fetchable by Get/List for S3 playback.
+	if err := db.Recordings.MarkLocalRemoved("r1"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = db.Recordings.Get("r1")
+	if !got.LocalRemoved || got.S3Key != "bucket/key.mp4" {
+		t.Errorf("expected localRemoved with S3 key preserved, got %+v", got)
+	}
+	if total, _ := db.Recordings.TotalSize(); total != 0 {
+		t.Errorf("local_removed recording should not count toward TotalSize, got %d", total)
+	}
+	if old, _ := db.Recordings.OldestComplete(10, true); len(old) != 0 {
+		t.Errorf("local_removed recording should not be a retention candidate, got %d", len(old))
+	}
 }
 
 func TestRecordingListOverlapping(t *testing.T) {

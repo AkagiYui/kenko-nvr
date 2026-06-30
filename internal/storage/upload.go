@@ -14,6 +14,9 @@ import (
 type UploadStore interface {
 	PendingUploads(limit int) ([]database.Recording, error)
 	MarkUploaded(id, s3Key string) error
+	// MarkLocalRemoved keeps the row but flags the local file as deleted, used
+	// after deleting the local copy of an uploaded recording.
+	MarkLocalRemoved(id string) error
 }
 
 // UploadWorker periodically uploads completed-but-not-yet-uploaded recordings.
@@ -95,8 +98,15 @@ func (w *UploadWorker) runOnce(ctx context.Context) {
 		}
 
 		if cfg.DeleteLocalAfterUpload {
-			if err := os.Remove(localPath); err != nil && w.Log != nil {
-				w.Log.Warn("removing local file after upload", "err", err)
+			// Drop the local copy but keep the row flagged local_removed so the
+			// clip stays listed and remains playable from S3 (streamed back
+			// through the NVR).
+			if rmErr := os.Remove(localPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				if w.Log != nil {
+					w.Log.Warn("removing local file after upload", "err", rmErr)
+				}
+			} else if err := w.Store.MarkLocalRemoved(rec.ID); err != nil && w.Log != nil {
+				w.Log.Error("marking local removed", "err", err)
 			}
 		}
 	}

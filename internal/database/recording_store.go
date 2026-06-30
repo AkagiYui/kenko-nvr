@@ -27,11 +27,11 @@ func (s *RecordingStore) Create(r Recording) error {
 		r.CreatedAt = MS(time.Now())
 	}
 	_, err := s.db.Exec(`INSERT INTO recordings (id, camera_id, path, start_time, end_time,
-		duration_ms, size_bytes, complete, uploaded, s3_key, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		duration_ms, size_bytes, complete, uploaded, s3_key, local_removed, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.CameraID, r.Path, timeToMS(r.StartTime.Time), timeToMS(r.EndTime.Time),
 		r.DurationMS, r.SizeBytes, boolToInt(r.Complete), boolToInt(r.Uploaded),
-		r.S3Key, timeToMS(r.CreatedAt.Time))
+		r.S3Key, boolToInt(r.LocalRemoved), timeToMS(r.CreatedAt.Time))
 	return err
 }
 
@@ -45,6 +45,14 @@ func (s *RecordingStore) Finalize(id string, endTime time.Time, durationMS, size
 // MarkUploaded records a successful S3 upload.
 func (s *RecordingStore) MarkUploaded(id, s3Key string) error {
 	_, err := s.db.Exec(`UPDATE recordings SET uploaded=1, s3_key=? WHERE id=?`, s3Key, id)
+	return err
+}
+
+// MarkLocalRemoved flags a recording's local file as deleted while keeping the
+// row. The clip stays listed and is served from S3; it no longer counts toward
+// local-disk usage nor is it a retention deletion candidate.
+func (s *RecordingStore) MarkLocalRemoved(id string) error {
+	_, err := s.db.Exec(`UPDATE recordings SET local_removed=1 WHERE id=?`, id)
 	return err
 }
 
@@ -65,7 +73,7 @@ func (s *RecordingStore) Delete(id string) error {
 }
 
 const recordingSelect = `SELECT id, camera_id, path, start_time, end_time, duration_ms,
-	size_bytes, complete, uploaded, s3_key, created_at FROM recordings`
+	size_bytes, complete, uploaded, s3_key, local_removed, created_at FROM recordings`
 
 // List returns recordings matching the filter, newest first.
 func (s *RecordingStore) List(f RecordingFilter) ([]Recording, error) {
@@ -169,7 +177,9 @@ func (s *RecordingStore) PendingUploads(limit int) ([]Recording, error) {
 // OldestComplete returns completed recordings ordered oldest first, used by the
 // retention worker. onlyUploaded limits the result to already-uploaded files.
 func (s *RecordingStore) OldestComplete(limit int, onlyUploaded bool) ([]Recording, error) {
-	q := recordingSelect + ` WHERE complete = 1`
+	// local_removed rows have no local file left to free, so they are never
+	// retention deletion candidates.
+	q := recordingSelect + ` WHERE complete = 1 AND local_removed = 0`
 	if onlyUploaded {
 		q += ` AND uploaded = 1`
 	}
@@ -191,19 +201,21 @@ func (s *RecordingStore) OldestComplete(limit int, onlyUploaded bool) ([]Recordi
 	return out, rows.Err()
 }
 
-// TotalSize returns the summed size of all completed recordings in bytes.
+// TotalSize returns the summed size of all completed recordings that still have
+// a local file, in bytes. Recordings whose local copy was deleted (kept only on
+// S3) are excluded, since they no longer occupy local disk.
 func (s *RecordingStore) TotalSize() (int64, error) {
 	var total sql.NullInt64
-	err := s.db.QueryRow(`SELECT COALESCE(SUM(size_bytes),0) FROM recordings WHERE complete = 1`).Scan(&total)
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(size_bytes),0) FROM recordings WHERE complete = 1 AND local_removed = 0`).Scan(&total)
 	return total.Int64, err
 }
 
 func scanRecording(sc scanner) (Recording, error) {
 	var r Recording
 	var startMS, endMS, createdMS int64
-	var complete, uploaded int
+	var complete, uploaded, localRemoved int
 	err := sc.Scan(&r.ID, &r.CameraID, &r.Path, &startMS, &endMS, &r.DurationMS,
-		&r.SizeBytes, &complete, &uploaded, &r.S3Key, &createdMS)
+		&r.SizeBytes, &complete, &uploaded, &r.S3Key, &localRemoved, &createdMS)
 	if err != nil {
 		return Recording{}, err
 	}
@@ -212,5 +224,6 @@ func scanRecording(sc scanner) (Recording, error) {
 	r.CreatedAt = MS(msToTime(createdMS))
 	r.Complete = complete != 0
 	r.Uploaded = uploaded != 0
+	r.LocalRemoved = localRemoved != 0
 	return r, nil
 }
