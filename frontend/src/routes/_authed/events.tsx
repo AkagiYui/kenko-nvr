@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/solid-router";
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { Icon } from "@iconify-icon/solid";
-import { api, getToken } from "~/lib/api";
+import { api } from "~/lib/api";
 import { toast } from "~/components/toast";
 import { Modal } from "~/components/Modal";
+import { RecordingPlayer } from "~/components/RecordingPlayer";
 import { MultiSelect } from "~/components/MultiSelect";
 import { RangePicker } from "~/components/RangePicker";
 import { defaultRange } from "~/lib/timerange";
@@ -170,31 +171,15 @@ function EventPlayer(props: { event: NvrEvent; cameraName: string; onClose: () =
   const [idx, setIdx] = createSignal(0);
   const current = () => recs[idx()];
 
-  const fileUrl = (r: Recording) =>
-    `/api/recordings/${r.id}/file?token=${encodeURIComponent(getToken())}`;
-
   // Offset (seconds) into a clip where the event begins; only the first clip is
   // seeked, and only when the event started after the clip did.
   const startOffset = (r: Recording) => Math.max(0, (props.event.startTime - r.startTime) / 1000);
 
   return (
     <Modal title="事件录像" hideOk width={760} onClose={props.onClose}>
-      <video
-        controls
-        autoplay
-        class="w-full bg-black rounded-lg"
-        src={fileUrl(current())}
-        onLoadedMetadata={(ev) => {
-          // Land on the event moment in the first clip; later clips play from 0.
-          const off = idx() === 0 ? startOffset(current()) : 0;
-          if (off > 0) {
-            try {
-              ev.currentTarget.currentTime = off;
-            } catch {
-              /* ignore */
-            }
-          }
-        }}
+      <RecordingPlayer
+        recordingId={current().id}
+        offsetSec={idx() === 0 ? startOffset(current()) : 0}
         onEnded={() => {
           if (idx() < recs.length - 1) setIdx(idx() + 1);
         }}

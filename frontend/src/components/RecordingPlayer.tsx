@@ -26,6 +26,8 @@ interface Props {
   recordingId: string;
   // Seek target in seconds (e.g. a person's appearance offset).
   offsetSec?: number;
+  // Called when the clip finishes (used to chain event clips).
+  onEnded?: () => void;
 }
 
 export function RecordingPlayer(props: Props) {
@@ -106,6 +108,11 @@ export function RecordingPlayer(props: Props) {
         },
       ],
     });
+
+    if (props.onEnded) {
+      const onEnded = props.onEnded;
+      art.on("video:ended", () => onEnded());
+    }
 
     // For the original MP4 the timeline is the whole file, so seek to the offset;
     // for HLS the transcode already started at the offset (playhead 0 = offset).
