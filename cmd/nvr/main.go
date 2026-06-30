@@ -136,7 +136,8 @@ func main() {
 			c, _ := db.Settings.Face()
 			return c
 		},
-		Log: log,
+		Assigner: &face.Gallery{DB: db, Log: log},
+		Log:      log,
 	}
 	go faceWorker.Run(ctx, 5*time.Second)
 

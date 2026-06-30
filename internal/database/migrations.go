@@ -156,6 +156,35 @@ var migrations = []string{
 	)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_face_jobs_recording ON face_jobs(recording_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_face_jobs_state ON face_jobs(state, created_at)`,
+
+	// --- v15: face tracks ---------------------------------------------------
+	// A track groups the faces the tracker linked as one appearance within a
+	// recording. It carries a quality-weighted representative embedding and is
+	// the unit that gets matched to a person and (phase 3) re-clustered.
+	// cand_person_id/cand_sim record the nearest non-assigned candidate, so the
+	// review/merge UI can suggest joins even when the match was below threshold.
+	`CREATE TABLE IF NOT EXISTS face_tracks (
+		id             TEXT PRIMARY KEY,
+		recording_id   TEXT NOT NULL,
+		camera_id      TEXT NOT NULL DEFAULT '',
+		person_id      TEXT NOT NULL DEFAULT '',
+		start_ts       INTEGER NOT NULL DEFAULT 0,
+		end_ts         INTEGER NOT NULL DEFAULT 0,
+		face_count     INTEGER NOT NULL DEFAULT 0,
+		quality        REAL NOT NULL DEFAULT 0,
+		rep_embedding  BLOB,
+		dim            INTEGER NOT NULL DEFAULT 0,
+		best_face_id   TEXT NOT NULL DEFAULT '',
+		best_offset_ms INTEGER NOT NULL DEFAULT 0,
+		cand_person_id TEXT NOT NULL DEFAULT '',
+		cand_sim       REAL NOT NULL DEFAULT 0,
+		confirmed      INTEGER NOT NULL DEFAULT 0,
+		created_at     INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_face_tracks_person ON face_tracks(person_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_face_tracks_recording ON face_tracks(recording_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_face_tracks_camera_ts ON face_tracks(camera_id, start_ts)`,
 }
 
 func (d *DB) migrate() error {

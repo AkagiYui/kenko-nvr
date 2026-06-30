@@ -24,6 +24,7 @@ type DB struct {
 	Push       *PushStore
 	Persons    *PersonStore
 	Faces      *FaceStore
+	FaceTracks *FaceTrackStore
 	FaceJobs   *FaceJobStore
 }
 
@@ -69,6 +70,7 @@ func Open(path string) (*DB, error) {
 	db.Push = &PushStore{db: sqlDB}
 	db.Persons = &PersonStore{db: sqlDB}
 	db.Faces = &FaceStore{db: sqlDB}
+	db.FaceTracks = &FaceTrackStore{db: sqlDB}
 	db.FaceJobs = &FaceJobStore{db: sqlDB}
 	return db, nil
 }

@@ -161,6 +161,51 @@ func (s *FaceStore) CountByRecording(recordingID string) (int, error) {
 	return n, err
 }
 
+// AssignTrackFaces sets the track and person of a set of faces in one statement.
+func (s *FaceStore) AssignTrackFaces(faceIDs []string, trackID, personID string) error {
+	if len(faceIDs) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(faceIDs)+2)
+	args = append(args, trackID, personID)
+	for _, id := range faceIDs {
+		args = append(args, id)
+	}
+	_, err := s.db.Exec(`UPDATE faces SET track_id=?, person_id=? WHERE id IN (`+
+		inPlaceholders(len(faceIDs))+`)`, args...)
+	return err
+}
+
+// SetPersonByTrack reassigns every face of a track to a person (or "" to detach).
+func (s *FaceStore) SetPersonByTrack(trackID, personID string) error {
+	_, err := s.db.Exec(`UPDATE faces SET person_id=? WHERE track_id=?`, personID, trackID)
+	return err
+}
+
+// SetExemplar flags or unflags a face as a gallery exemplar.
+func (s *FaceStore) SetExemplar(faceID string, exemplar bool) error {
+	_, err := s.db.Exec(`UPDATE faces SET is_exemplar=? WHERE id=?`, boolToInt(exemplar), faceID)
+	return err
+}
+
+// SetIgnored flags or unflags a face as a false positive / non-face.
+func (s *FaceStore) SetIgnored(faceID string, ignored bool) error {
+	_, err := s.db.Exec(`UPDATE faces SET ignored=? WHERE id=?`, boolToInt(ignored), faceID)
+	return err
+}
+
+// PruneExemplars keeps only the highest-quality `keep` exemplars for a person,
+// clearing the is_exemplar flag on the rest, so the gallery stays compact and
+// diverse-by-quality without growing unbounded.
+func (s *FaceStore) PruneExemplars(personID string, keep int) error {
+	_, err := s.db.Exec(`UPDATE faces SET is_exemplar=0
+		WHERE person_id=? AND is_exemplar=1 AND id NOT IN (
+			SELECT id FROM faces WHERE person_id=? AND is_exemplar=1
+			ORDER BY quality DESC LIMIT ?
+		)`, personID, personID, keep)
+	return err
+}
+
 func scanFace(sc scanner) (Face, error) {
 	var f Face
 	var tsMS, createdMS int64
