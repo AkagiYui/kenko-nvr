@@ -15,8 +15,9 @@ Environment:
   FACE_MODEL_PACK   InsightFace model pack name (default: buffalo_l).
   FACE_DET_SIZE     Detector input square size in px (default: 640).
   FACE_DET_THRESH   Detector score threshold (default: 0.5).
-  FACE_PROVIDER     onnxruntime execution provider: "cpu" (default) or
-                    "openvino" (needs the openvino extra; Intel CPU speedup).
+  FACE_PROVIDER     onnxruntime execution provider: "cpu" (default), "coreml"
+                    (Apple Neural Engine / GPU — macOS host only, not in a
+                    Linux container), "openvino" (Intel CPU), or "auto".
   FACE_THREADS      Best-effort cap on internal threads (OpenCV + BLAS). The
                     hard CPU cap in production is a container quota (--cpus).
   INSIGHTFACE_HOME  Where model packs are cached (default: ~/.insightface).
@@ -44,8 +45,11 @@ if _FACE_THREADS and _FACE_THREADS != "0":
     ):
         os.environ.setdefault(_var, _FACE_THREADS)
 
+import platform
+
 import cv2
 import numpy as np
+import onnxruntime as ort
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -66,9 +70,23 @@ _state: dict = {}
 
 
 def _providers() -> list[str]:
-    if PROVIDER in ("openvino", "ov"):
-        # Fall back to plain CPU if the OpenVINO provider is not installed.
+    """Resolve the onnxruntime execution providers from FACE_PROVIDER, only
+    selecting an accelerator that is actually available (else plain CPU).
+
+    - "coreml"/"metal": Apple CoreML EP — uses the Neural Engine / GPU (Metal).
+      Only available when running natively on macOS; a Linux container (incl.
+      Docker on a Mac) does not have it and falls back to CPU.
+    - "openvino": Intel CPU acceleration (needs the openvino extra).
+    - "auto": CoreML on macOS, otherwise CPU.
+    """
+    avail = set(ort.get_available_providers())
+    want = PROVIDER
+    if want == "auto":
+        want = "coreml" if platform.system() == "Darwin" else "cpu"
+    if want in ("openvino", "ov") and "OpenVINOExecutionProvider" in avail:
         return ["OpenVINOExecutionProvider", "CPUExecutionProvider"]
+    if want in ("coreml", "metal", "mps") and "CoreMLExecutionProvider" in avail:
+        return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]
 
 

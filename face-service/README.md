@@ -92,6 +92,22 @@ You can also reduce total work from the NVR's face settings (lower **sample fps*
 / **max frames per recording**), and co-locate the sidecar with the NVR so the
 sampled frames it receives never leave the host/LAN.
 
+## macOS acceleration (Apple Neural Engine / GPU)
+
+Docker on a Mac runs a Linux VM with **no access to the Mac GPU/ANE/Metal**, so a
+container is always CPU-only there. To use Apple's Neural Engine / GPU, run the
+sidecar **natively on the host** with the CoreML provider:
+
+```bash
+cd face-service
+FACE_PROVIDER=coreml uv run uvicorn app.main:app --host 127.0.0.1 --port 8077
+# (FACE_PROVIDER=auto also picks CoreML on macOS)
+```
+
+Then point the NVR's face SidecarURL at it. `GET /healthz` reports the active
+provider. On Linux with an Intel CPU, use the OpenVINO image instead; with an
+NVIDIA GPU, a CUDA onnxruntime build + `--gpus all` works in a container.
+
 ## Tests
 
 ```bash
