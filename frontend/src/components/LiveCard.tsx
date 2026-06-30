@@ -1,7 +1,8 @@
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import type { Camera, CameraStatus } from "~/lib/types";
 import { atLeastOperator, getToken } from "~/lib/api";
 import { isPlaying, startPlayer, stopPlayer, type LiveMode, type Overlay } from "~/lib/player";
+import { liveMode, setLiveMode, LIVE_MODES } from "~/lib/livemode";
 import { startTalk, type TalkHandle } from "~/lib/talk";
 import { toast } from "./toast";
 import { PtzControls } from "./PtzControls";
@@ -33,7 +34,6 @@ export function LiveCard(props: { camera: Camera; status: () => CameraStatus }) 
   let videoRef!: HTMLVideoElement;
   const [ovText, setOvText] = createSignal<string | null>("加载中…");
   const [ovClick, setOvClick] = createSignal<(() => void) | null>(null);
-  const [mode, setMode] = createSignal<LiveMode>("mse");
   const [talking, setTalking] = createSignal(false);
   let talk: TalkHandle | null = null;
   let startedMode: LiveMode | null = null;
@@ -55,7 +55,7 @@ export function LiveCard(props: { camera: Camera; status: () => CameraStatus }) 
 
   createEffect(() => {
     const st = props.status();
-    const m = mode();
+    const m = liveMode();
     const playing = isPlaying(videoRef);
     if (st.live) {
       if (!playing || startedMode !== m) {
@@ -146,20 +146,18 @@ export function LiveCard(props: { camera: Camera; status: () => CameraStatus }) 
 
       <div class="flex items-center gap-2 px-3 py-2 border-t border-base-300">
         <div class="join">
-          <button
-            class="btn btn-xs join-item"
-            classList={{ "btn-primary": mode() === "mse", "btn-ghost": mode() !== "mse" }}
-            onClick={() => setMode("mse")}
-          >
-            MSE
-          </button>
-          <button
-            class="btn btn-xs join-item"
-            classList={{ "btn-primary": mode() === "webrtc", "btn-ghost": mode() !== "webrtc" }}
-            onClick={() => setMode("webrtc")}
-          >
-            WebRTC
-          </button>
+          <For each={LIVE_MODES}>
+            {(lm) => (
+              <button
+                class="btn btn-xs join-item"
+                classList={{ "btn-primary": liveMode() === lm.value, "btn-ghost": liveMode() !== lm.value }}
+                title={lm.hint}
+                onClick={() => setLiveMode(lm.value)}
+              >
+                {lm.label}
+              </button>
+            )}
+          </For>
         </div>
         <Show when={canTalk()}>
           <button

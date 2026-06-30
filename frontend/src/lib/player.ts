@@ -58,7 +58,7 @@ function tryPlay(video: HTMLVideoElement, overlay: Overlay): void {
   }
 }
 
-export type LiveMode = "mse" | "webrtc";
+export type LiveMode = "mse" | "webrtc" | "hls";
 
 export function startPlayer(
   video: HTMLVideoElement,
@@ -70,6 +70,8 @@ export function startPlayer(
   video.playsInline = true;
   if (mode === "webrtc" && window.RTCPeerConnection) {
     startWebrtcPlayer(video, cameraId, overlay);
+  } else if (mode === "hls") {
+    startHlsPlayer(video, cameraId, overlay);
   } else if (window.MediaSource) {
     startMsePlayer(video, cameraId, overlay);
   } else {

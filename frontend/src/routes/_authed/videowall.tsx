@@ -3,7 +3,8 @@ import { createEffect, createResource, createSignal, For, onCleanup, onMount, Sh
 import { createStore } from "solid-js/store";
 import { api } from "~/lib/api";
 import { subscribeStatus } from "~/lib/status";
-import { isPlaying, startPlayer, stopPlayer, type Overlay } from "~/lib/player";
+import { isPlaying, startPlayer, stopPlayer, type LiveMode, type Overlay } from "~/lib/player";
+import { liveMode, setLiveMode, LIVE_MODES } from "~/lib/livemode";
 import { broadcasterMode } from "~/lib/broadcaster";
 import type { Camera, CameraStatus, VideoWallConfig } from "~/lib/types";
 
@@ -108,6 +109,20 @@ function VideoWall() {
           </For>
         </div>
         <div class="flex-1" />
+        <div class="join" title="直播格式（全部画面共用）">
+          <For each={LIVE_MODES}>
+            {(lm) => (
+              <button
+                class="btn btn-sm join-item"
+                classList={{ "btn-primary": liveMode() === lm.value, "btn-ghost": liveMode() !== lm.value }}
+                title={lm.hint}
+                onClick={() => setLiveMode(lm.value)}
+              >
+                {lm.label}
+              </button>
+            )}
+          </For>
+        </div>
         <button class="btn btn-sm btn-ghost" onClick={toggleFullscreen}>
           全屏
         </button>
@@ -147,6 +162,7 @@ function WallTile(props: {
   let videoRef!: HTMLVideoElement;
   const [ov, setOv] = createSignal<string | null>(null);
   let startedFor: string | null = null;
+  let startedMode: LiveMode | null = null;
   const overlay: Overlay = {
     show: (t) => setOv(t),
     prompt: (t) => setOv(t),
@@ -156,26 +172,30 @@ function WallTile(props: {
   createEffect(() => {
     const cam = props.camera;
     const st = props.status();
+    const m = liveMode();
     if (!cam) {
       if (startedFor) {
         stopPlayer(videoRef);
         startedFor = null;
+        startedMode = null;
       }
       setOv(null);
       return;
     }
     const playing = isPlaying(videoRef);
     if (st.live) {
-      if (!playing || startedFor !== cam.id) {
+      if (!playing || startedFor !== cam.id || startedMode !== m) {
         stopPlayer(videoRef);
         setOv("加载中…");
-        startPlayer(videoRef, cam.id, overlay, "mse");
+        startPlayer(videoRef, cam.id, overlay, m);
         startedFor = cam.id;
+        startedMode = m;
       }
     } else {
       if (playing) {
         stopPlayer(videoRef);
         startedFor = null;
+        startedMode = null;
       }
       setOv(st.error ? "无信号" : "等待视频流…");
     }
