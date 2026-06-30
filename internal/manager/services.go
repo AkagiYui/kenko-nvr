@@ -84,6 +84,10 @@ func (m *Manager) liveEncoderGet() *hwaccel.Encoder {
 	return m.liveEncoder
 }
 
+// LiveEncoder returns the probed live-transcode encoder (nil if FFmpeg is
+// absent). Reused by on-demand recording HLS transcoding.
+func (m *Manager) LiveEncoder() *hwaccel.Encoder { return m.liveEncoderGet() }
+
 // run launches fn as a supervised goroutine tracked by m.wg, returning a service
 // handle. Caller holds m.svcMu.
 func (m *Manager) run(sig string, fn func(context.Context) error, name string) *service {

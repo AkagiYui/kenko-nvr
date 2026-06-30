@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,6 +20,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
 	"github.com/AkagiYui/kenko-nvr/internal/netstat"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
+	"github.com/AkagiYui/kenko-nvr/internal/rechls"
 	webui "github.com/AkagiYui/kenko-nvr/internal/web"
 )
 
@@ -33,6 +36,8 @@ type Server struct {
 	// archive opens recordings that were uploaded to S3 and then removed locally,
 	// so they can be streamed back through the NVR. A field so tests can stub it.
 	archive recordingArchive
+	// rechls transcodes recordings to H.264 HLS on demand for resumable playback.
+	rechls *rechls.Manager
 }
 
 // New creates the API server.
@@ -50,6 +55,7 @@ func New(cfg config.Config, db *database.DB, mgr *manager.Manager, notifier *not
 		auth:     newAuthenticator(db.Users),
 		notifier: notifier,
 		archive:  s3Archive{settings: db.Settings},
+		rechls:   rechls.New(filepath.Join(os.TempDir(), "kenko-nvr-hls"), mgr.LiveEncoder, log),
 	}
 	s.http = &http.Server{
 		Addr:              cfg.HTTP.Addr,
@@ -84,6 +90,7 @@ func (s *Server) router() http.Handler {
 			r.Get("/cameras/{id}/ptz/presets", s.handlePTZPresets)
 			r.Get("/recordings", s.handleListRecordings)
 			r.Get("/recordings/{id}", s.handleGetRecording)
+			r.Get("/recordings/{id}/hls", s.handleRecordingHLSStart)
 			r.Get("/events", s.handleListEvents)
 			r.Get("/persons", s.handleListPersons)
 			r.Get("/persons/{id}", s.handleGetPerson)
@@ -164,6 +171,7 @@ func (s *Server) router() http.Handler {
 			r.Post("/cameras/{id}/webrtc", s.handleWebRTC)
 			r.Get("/cameras/{id}/talk", s.handleTalk)
 			r.Get("/recordings/{id}/file", s.handleRecordingFile)
+			r.Get("/rechls/{sid}/{file}", s.handleHLSFile)
 			r.Get("/faces/{id}/thumb", s.handleFaceThumb)
 			r.Get("/persons/{id}/thumb", s.handlePersonThumb)
 			r.Get("/ws", s.handleWS)
@@ -185,6 +193,8 @@ func (s *Server) Run(ctx context.Context) error {
 	// Wrap the listener so all client traffic is tallied for the live throughput
 	// widget (camera ingest is counted separately; see internal/netstat).
 	ln = netstat.Listener(ln)
+	// Reap idle recording-HLS transcode sessions; torn down on ctx cancel.
+	go s.rechls.Run(ctx)
 	go func() {
 		s.log.Info("http server listening", "addr", s.cfg.HTTP.Addr)
 		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
