@@ -13,7 +13,23 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/argon2"
+
+	"github.com/AkagiYui/kenko-nvr/internal/database"
 )
+
+// CipherFromS3 builds a Cipher from the client-side-encryption settings of an S3
+// config, or (nil, nil) when encryption is disabled. Reused for face thumbnails
+// so biometric crops are encrypted at rest with the same key as archived video.
+func CipherFromS3(cfg database.S3Config) (*Cipher, error) {
+	if !cfg.EncryptionEnabled || cfg.EncryptionKey == "" {
+		return nil, nil
+	}
+	key, err := DeriveKey(cfg.EncryptionKey, cfg.EncryptionSalt)
+	if err != nil {
+		return nil, err
+	}
+	return NewCipher(key)
+}
 
 // Client-side encryption for recordings archived to S3.
 //
@@ -240,6 +256,36 @@ func DeriveKey(passphrase, saltB64 string) ([]byte, error) {
 	k := argon2.IDKey([]byte(passphrase), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	keyCache[ck] = k
 	return k, nil
+}
+
+// IsEncryptedHeader reports whether b begins with the KNV1 magic, i.e. the data
+// was produced by EncryptReader. Lets a reader auto-detect encrypted vs plaintext
+// files (e.g. face thumbnails written before/after encryption was enabled).
+func IsEncryptedHeader(b []byte) bool {
+	return len(b) >= encMagicLen && string(b[:encMagicLen]) == encMagic
+}
+
+// DecryptAll decrypts a whole in-memory encrypted object (header + ciphertext).
+// Suitable for small blobs like thumbnails; recordings use the seekable path.
+func (c *Cipher) DecryptAll(data []byte) ([]byte, error) {
+	rs, size, err := c.DecryptingReadSeeker(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, size)
+	if _, err := io.ReadFull(rs, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EncryptAll encrypts a whole in-memory blob, returning header + ciphertext.
+func (c *Cipher) EncryptAll(data []byte) ([]byte, error) {
+	r, err := c.EncryptReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(r)
 }
 
 // NewSalt returns a fresh random 16-byte salt, base64-encoded, for a new

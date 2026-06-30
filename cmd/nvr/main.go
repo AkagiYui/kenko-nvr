@@ -131,6 +131,7 @@ func main() {
 	faceWorker := &face.Worker{
 		DB:         db,
 		Root:       cfg.Storage.RecordingsDir,
+		FacesDir:   cfg.Storage.FacesDir,
 		FFmpegPath: "ffmpeg",
 		ConfigFn: func() database.FaceConfig {
 			c, _ := db.Settings.Face()

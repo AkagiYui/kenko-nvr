@@ -27,6 +27,7 @@ const NAV: NavItem[] = [
   { to: "/cameras", label: "摄像头管理", icon: "lucide:cctv" },
   { to: "/recordings", label: "录像回放", icon: "lucide:clapperboard" },
   { to: "/events", label: "事件", icon: "lucide:radar" },
+  { to: "/people", label: "人物", icon: "lucide:users-round" },
   { to: "/notifications", label: "通知告警", icon: "lucide:bell", adminOnly: true },
   { to: "/users", label: "用户管理", icon: "lucide:users", adminOnly: true },
   { to: "/settings", label: "系统设置", icon: "lucide:settings", adminOnly: true },

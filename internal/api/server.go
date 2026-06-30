@@ -164,6 +164,8 @@ func (s *Server) router() http.Handler {
 			r.Post("/cameras/{id}/webrtc", s.handleWebRTC)
 			r.Get("/cameras/{id}/talk", s.handleTalk)
 			r.Get("/recordings/{id}/file", s.handleRecordingFile)
+			r.Get("/faces/{id}/thumb", s.handleFaceThumb)
+			r.Get("/persons/{id}/thumb", s.handlePersonThumb)
 			r.Get("/ws", s.handleWS)
 		})
 	})

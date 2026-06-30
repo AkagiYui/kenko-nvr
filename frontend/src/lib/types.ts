@@ -101,6 +101,66 @@ export interface User {
   createdAt?: number; // epoch milliseconds (UTC)
 }
 
+// --- Face recognition ---
+
+export interface Person {
+  id: string;
+  name: string;
+  notes?: string;
+  coverFaceId?: string;
+  named?: boolean;
+  faceCount: number;
+  firstSeen?: number; // epoch ms
+  lastSeen?: number; // epoch ms
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+// FaceTrack is one appearance of a person within a recording.
+export interface FaceTrack {
+  id: string;
+  recordingId: string;
+  cameraId: string;
+  personId: string;
+  startTs?: number; // epoch ms
+  endTs?: number; // epoch ms
+  faceCount: number;
+  quality?: number;
+  bestFaceId?: string;
+  bestOffsetMs?: number; // seek target within the recording
+  candSim?: number;
+  confirmed?: boolean;
+}
+
+export interface PersonDetail extends Person {
+  appearances: FaceTrack[];
+  recordings?: Recording[];
+}
+
+export interface FaceConfig {
+  enabled: boolean;
+  sidecarURL: string;
+  sampleFps: number;
+  maxFramesPerJob: number;
+  batchSize: number;
+  analyzeWidth: number;
+  minFaceSize: number;
+  detThreshold: number;
+  minQuality: number;
+  motionGated: boolean;
+  matchThreshold: number;
+  reviewThreshold: number;
+}
+
+export interface FaceStatus {
+  enabled: boolean;
+  sidecarOk: boolean;
+  sidecar?: { status: string; model: string; dim: number; provider: string };
+  sidecarErr?: string;
+  jobs: Record<string, number>;
+  personCount: number;
+}
+
 export interface Me {
   id: string;
   username: string;

@@ -2,13 +2,17 @@ package face
 
 import (
 	"context"
+	"image"
 	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/storage"
 )
 
 // maxAttempts bounds how many times a failing job is retried before it sticks
@@ -28,10 +32,28 @@ type Assigner interface {
 type Worker struct {
 	DB         *database.DB
 	Root       string // recordings root dir
+	FacesDir   string // where cropped face thumbnails are written ("" disables)
 	FFmpegPath string // "" -> "ffmpeg"
 	ConfigFn   func() database.FaceConfig
 	Assigner   Assigner
 	Log        *slog.Logger
+}
+
+// faceCipher returns the thumbnail-at-rest cipher derived from the S3 encryption
+// settings, or nil when client-side encryption is off.
+func (w *Worker) faceCipher() *storage.Cipher {
+	cfg, err := w.DB.Settings.S3()
+	if err != nil {
+		return nil
+	}
+	c, err := storage.CipherFromS3(cfg)
+	if err != nil {
+		if w.Log != nil {
+			w.Log.Warn("face: thumbnail cipher unavailable", "err", err)
+		}
+		return nil
+	}
+	return c
 }
 
 // Run polls the queue every interval until ctx is cancelled.
@@ -119,6 +141,11 @@ func (w *Worker) process(ctx context.Context, job database.FaceJob, cfg database
 		batchSize = 16
 	}
 
+	cipher := w.faceCipher()
+	if w.FacesDir != "" {
+		_ = os.MkdirAll(w.FacesDir, 0o755)
+	}
+
 	faceCount := 0
 	for _, rg := range w.ranges(rec, cfg) {
 		if budget <= 0 {
@@ -139,7 +166,7 @@ func (w *Worker) process(ctx context.Context, job database.FaceJob, cfg database
 			if err != nil {
 				return err
 			}
-			n, err := w.storeBatch(rec, batch, dets, model, dim, cfg)
+			n, err := w.storeBatch(rec, batch, dets, model, dim, cfg, cipher)
 			if err != nil {
 				return err
 			}
@@ -164,8 +191,9 @@ func (w *Worker) process(ctx context.Context, job database.FaceJob, cfg database
 }
 
 // storeBatch persists the detections of one analysed frame-batch, applying the
-// detection/size/quality gates. Returns how many faces were stored.
-func (w *Worker) storeBatch(rec database.Recording, batch []Frame, dets [][]Detection, model string, dim int, cfg database.FaceConfig) (int, error) {
+// detection/size/quality gates and writing a (optionally encrypted) cropped
+// thumbnail per kept face. Returns how many faces were stored.
+func (w *Worker) storeBatch(rec database.Recording, batch []Frame, dets [][]Detection, model string, dim int, cfg database.FaceConfig, cipher *storage.Cipher) (int, error) {
 	n := 0
 	for k, frameDets := range dets {
 		if k >= len(batch) {
@@ -173,6 +201,8 @@ func (w *Worker) storeBatch(rec database.Recording, batch []Frame, dets [][]Dete
 		}
 		fr := batch[k]
 		ts := rec.StartTime.Time.Add(time.Duration(fr.OffsetMS) * time.Millisecond)
+		var frameImg image.Image // decoded lazily on the first kept face of this frame
+		decoded := false
 		for _, d := range frameDets {
 			if d.DetScore < cfg.DetThreshold {
 				continue
@@ -186,17 +216,36 @@ func (w *Worker) storeBatch(rec database.Recording, batch []Frame, dets [][]Dete
 			if cfg.MinQuality > 0 && q < cfg.MinQuality {
 				continue
 			}
+			bbox := database.BBox{X: d.BBox[0], Y: d.BBox[1], W: fw, H: fh}
+			id := uuid.NewString()
+			thumb := ""
+			if w.FacesDir != "" {
+				if !decoded {
+					frameImg = decodeJPEG(fr.JPEG)
+					decoded = true
+				}
+				if frameImg != nil {
+					if jb, err := cropFace(frameImg, bbox); err == nil {
+						rel := thumbRelPath(id)
+						if err := writeThumb(w.FacesDir, rel, jb, cipher); err == nil {
+							thumb = rel
+						}
+					}
+				}
+			}
 			face := database.Face{
+				ID:          id,
 				RecordingID: rec.ID,
 				CameraID:    rec.CameraID,
 				Timestamp:   database.MS(ts),
 				OffsetMS:    fr.OffsetMS,
-				BBox:        database.BBox{X: d.BBox[0], Y: d.BBox[1], W: fw, H: fh},
+				BBox:        bbox,
 				DetScore:    d.DetScore,
 				Quality:     q,
 				Embedding:   d.Embedding,
 				Dim:         dim,
 				Model:       model,
+				ThumbPath:   thumb,
 			}
 			if err := w.DB.Faces.Create(face); err != nil {
 				return n, err

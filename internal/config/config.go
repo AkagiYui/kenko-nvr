@@ -40,6 +40,9 @@ type HTTPConfig struct {
 type StorageConfig struct {
 	RecordingsDir string `yaml:"recordings_dir"`
 	DBPath        string `yaml:"db_path"`
+	// FacesDir holds cropped face thumbnails (optionally KNV1-encrypted). Defaults
+	// to a "faces" sibling of the database when empty.
+	FacesDir string `yaml:"faces_dir"`
 }
 
 // LogConfig configures logging.
@@ -56,6 +59,7 @@ func Default() Config {
 		Storage: StorageConfig{
 			RecordingsDir: "./data/recordings",
 			DBPath:        "./data/nvr.db",
+			FacesDir:      "./data/faces",
 		},
 		Log: LogConfig{
 			Level: "info",
