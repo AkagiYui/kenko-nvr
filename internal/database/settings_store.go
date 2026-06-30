@@ -15,6 +15,7 @@ const (
 	keyHomeAssistant = "homeassistant"
 	keyVideoWall     = "videowall"
 	keySystem        = "system"
+	keyFace          = "face"
 )
 
 // SettingsStore persists JSON-encoded settings blobs keyed by name.
@@ -167,6 +168,18 @@ func (s *SettingsStore) HomeAssistant() (HAConfig, error) {
 // SetHomeAssistant stores the Home Assistant discovery config.
 func (s *SettingsStore) SetHomeAssistant(c HAConfig) error {
 	return s.setJSON(keyHomeAssistant, c)
+}
+
+// Face returns the face-recognition config, or defaults if unset.
+func (s *SettingsStore) Face() (FaceConfig, error) {
+	c := DefaultFaceConfig()
+	_, err := s.getJSON(keyFace, &c)
+	return c, err
+}
+
+// SetFace stores the face-recognition config.
+func (s *SettingsStore) SetFace(c FaceConfig) error {
+	return s.setJSON(keyFace, c)
 }
 
 // VideoWall returns the saved video-wall layouts as an opaque, frontend-defined

@@ -22,6 +22,9 @@ type DB struct {
 	Users      *UserStore
 	Events     *EventStore
 	Push       *PushStore
+	Persons    *PersonStore
+	Faces      *FaceStore
+	FaceJobs   *FaceJobStore
 }
 
 // Open opens (creating if needed) the SQLite database at path, applies pragmas,
@@ -64,6 +67,9 @@ func Open(path string) (*DB, error) {
 	db.Users = &UserStore{db: sqlDB}
 	db.Events = &EventStore{db: sqlDB}
 	db.Push = &PushStore{db: sqlDB}
+	db.Persons = &PersonStore{db: sqlDB}
+	db.Faces = &FaceStore{db: sqlDB}
+	db.FaceJobs = &FaceJobStore{db: sqlDB}
 	return db, nil
 }
 

@@ -1,0 +1,25 @@
+[project]
+name = "kenko-face-service"
+version = "0.1.0"
+description = "Offline CPU face-detection + ArcFace embedding sidecar for kenko-nvr (InsightFace + onnxruntime)."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "numpy<2",
+    "opencv-python-headless>=4.9",
+    "onnxruntime>=1.17",
+    "insightface>=0.7.3",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+openvino = ["onnxruntime-openvino>=1.17"]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

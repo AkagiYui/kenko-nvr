@@ -422,9 +422,19 @@ func (m *Manager) SegmentStarted(cameraID, relPath string, start time.Time) (str
 	return id, err
 }
 
-// SegmentFinalized marks a recording complete.
+// SegmentFinalized marks a recording complete and, when face recognition is
+// enabled, enqueues it for post-process analysis (best-effort; a queue error
+// never fails the recording).
 func (m *Manager) SegmentFinalized(recordingID string, end time.Time, durationMS, sizeBytes int64) error {
-	return m.db.Recordings.Finalize(recordingID, end, durationMS, sizeBytes)
+	if err := m.db.Recordings.Finalize(recordingID, end, durationMS, sizeBytes); err != nil {
+		return err
+	}
+	if cfg, err := m.db.Settings.Face(); err == nil && cfg.Enabled {
+		if err := m.db.FaceJobs.Enqueue(recordingID); err != nil && m.log != nil {
+			m.log.Warn("face: enqueue failed", "recording", recordingID, "err", err)
+		}
+	}
+	return nil
 }
 
 // --- rtmp.PublishHandler ------------------------------------------------------

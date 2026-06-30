@@ -98,6 +98,64 @@ var migrations = []string{
 	// encrypted marks a recording whose S3 object is client-side encrypted and
 	// must be decrypted on download/playback.
 	`ALTER TABLE recordings ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0`,
+
+	// --- v14: face recognition — persons, faces, jobs -----------------------
+	// persons are discovered identities; faces are per-frame detections carrying
+	// a 512-d ArcFace embedding (little-endian float32 BLOB); face_jobs is the
+	// durable post-process work queue (one analysis job per recording).
+	`CREATE TABLE IF NOT EXISTS persons (
+		id            TEXT PRIMARY KEY,
+		name          TEXT NOT NULL DEFAULT '',
+		notes         TEXT NOT NULL DEFAULT '',
+		cover_face_id TEXT NOT NULL DEFAULT '',
+		named         INTEGER NOT NULL DEFAULT 0,
+		face_count    INTEGER NOT NULL DEFAULT 0,
+		first_seen    INTEGER NOT NULL DEFAULT 0,
+		last_seen     INTEGER NOT NULL DEFAULT 0,
+		created_at    INTEGER NOT NULL DEFAULT 0,
+		updated_at    INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE TABLE IF NOT EXISTS faces (
+		id           TEXT PRIMARY KEY,
+		recording_id TEXT NOT NULL,
+		camera_id    TEXT NOT NULL DEFAULT '',
+		person_id    TEXT NOT NULL DEFAULT '',
+		track_id     TEXT NOT NULL DEFAULT '',
+		ts           INTEGER NOT NULL DEFAULT 0,
+		offset_ms    INTEGER NOT NULL DEFAULT 0,
+		bbox_x       REAL NOT NULL DEFAULT 0,
+		bbox_y       REAL NOT NULL DEFAULT 0,
+		bbox_w       REAL NOT NULL DEFAULT 0,
+		bbox_h       REAL NOT NULL DEFAULT 0,
+		det_score    REAL NOT NULL DEFAULT 0,
+		quality      REAL NOT NULL DEFAULT 0,
+		embedding    BLOB,
+		dim          INTEGER NOT NULL DEFAULT 0,
+		model        TEXT NOT NULL DEFAULT '',
+		thumb_path   TEXT NOT NULL DEFAULT '',
+		is_exemplar  INTEGER NOT NULL DEFAULT 0,
+		confirmed    INTEGER NOT NULL DEFAULT 0,
+		ignored      INTEGER NOT NULL DEFAULT 0,
+		created_at   INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id, ts)`,
+	`CREATE INDEX IF NOT EXISTS idx_faces_recording ON faces(recording_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_faces_camera_ts ON faces(camera_id, ts)`,
+	`CREATE INDEX IF NOT EXISTS idx_faces_track ON faces(track_id)`,
+	`CREATE TABLE IF NOT EXISTS face_jobs (
+		id           TEXT PRIMARY KEY,
+		recording_id TEXT NOT NULL,
+		state        TEXT NOT NULL DEFAULT 'pending',
+		attempts     INTEGER NOT NULL DEFAULT 0,
+		error        TEXT NOT NULL DEFAULT '',
+		face_count   INTEGER NOT NULL DEFAULT 0,
+		created_at   INTEGER NOT NULL DEFAULT 0,
+		updated_at   INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+	)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_face_jobs_recording ON face_jobs(recording_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_face_jobs_state ON face_jobs(state, created_at)`,
 }
 
 func (d *DB) migrate() error {

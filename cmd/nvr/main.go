@@ -14,6 +14,7 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/api"
 	"github.com/AkagiYui/kenko-nvr/internal/config"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/face"
 	"github.com/AkagiYui/kenko-nvr/internal/hadiscovery"
 	"github.com/AkagiYui/kenko-nvr/internal/logger"
 	"github.com/AkagiYui/kenko-nvr/internal/manager"
@@ -123,6 +124,21 @@ func main() {
 		},
 	}
 	go uploader.Run(ctx, 30*time.Second)
+
+	// Face-recognition worker: drains the post-process queue (sample frames ->
+	// sidecar inference -> store faces -> group into identities). It idles unless
+	// face recognition is enabled in settings.
+	faceWorker := &face.Worker{
+		DB:         db,
+		Root:       cfg.Storage.RecordingsDir,
+		FFmpegPath: "ffmpeg",
+		ConfigFn: func() database.FaceConfig {
+			c, _ := db.Settings.Face()
+			return c
+		},
+		Log: log,
+	}
+	go faceWorker.Run(ctx, 5*time.Second)
 
 	// Management/API/HLS server (blocks until shutdown).
 	srv := api.New(cfg, db, mgr, notifier, log)
