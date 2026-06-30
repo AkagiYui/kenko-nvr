@@ -4,6 +4,7 @@ import { Icon } from "@iconify-icon/solid";
 import { api, atLeastOperator, getToken, isAdmin } from "~/lib/api";
 import { toast } from "~/components/toast";
 import { Modal } from "~/components/Modal";
+import { RecordingPlayer } from "~/components/RecordingPlayer";
 import { fmtTime } from "~/lib/format";
 import type { FaceConfig, FaceStatus, FaceTrack, Person, PersonDetail, Recording } from "~/lib/types";
 
@@ -13,7 +14,6 @@ export const Route = createFileRoute("/_authed/people")({
 
 const personThumb = (id: string) => `/api/persons/${id}/thumb?token=${encodeURIComponent(getToken())}`;
 const faceThumb = (id: string) => `/api/faces/${id}/thumb?token=${encodeURIComponent(getToken())}`;
-const recFileUrl = (id: string) => `/api/recordings/${id}/file?token=${encodeURIComponent(getToken())}`;
 
 interface Playing {
   rec: Recording;
@@ -169,21 +169,7 @@ function People() {
       <Show when={playing()}>
         {(p) => (
           <Modal title="录像回放" hideOk width={760} onClose={() => setPlaying(null)}>
-            <video
-              controls
-              autoplay
-              class="w-full bg-black rounded-lg"
-              src={recFileUrl(p().rec.id)}
-              onLoadedMetadata={(e) => {
-                if (p().offset > 0) {
-                  try {
-                    e.currentTarget.currentTime = p().offset;
-                  } catch {
-                    /* ignore */
-                  }
-                }
-              }}
-            />
+            <RecordingPlayer recordingId={p().rec.id} offsetSec={p().offset} />
             <p class="text-sm text-base-content/60 mt-2">{fmtTime(p().rec.startTime)}</p>
           </Modal>
         )}

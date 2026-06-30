@@ -4,6 +4,7 @@ import { api, getToken } from "~/lib/api";
 import { toast } from "~/components/toast";
 import { Modal } from "~/components/Modal";
 import { Timeline } from "~/components/Timeline";
+import { RecordingPlayer } from "~/components/RecordingPlayer";
 import { RangePicker } from "~/components/RangePicker";
 import { defaultRange } from "~/lib/timerange";
 import { fmtDur, fmtSize, fmtTime } from "~/lib/format";
@@ -171,21 +172,7 @@ function Recordings() {
       <Show when={playing()}>
         {(p) => (
           <Modal title="录像回放" hideOk width={760} onClose={() => setPlaying(null)}>
-            <video
-              controls
-              autoplay
-              class="w-full bg-black rounded-lg"
-              src={fileUrl(p().rec)}
-              onLoadedMetadata={(e) => {
-                if (p().offset > 0) {
-                  try {
-                    e.currentTarget.currentTime = p().offset;
-                  } catch {
-                    /* ignore */
-                  }
-                }
-              }}
-            />
+            <RecordingPlayer recordingId={p().rec.id} offsetSec={p().offset} />
             <p class="text-sm text-base-content/60 mt-2">
               {(camName()[p().rec.cameraId] ?? "") + " · " + fmtTime(p().rec.startTime)}
             </p>
