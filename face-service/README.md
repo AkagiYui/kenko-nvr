@@ -75,7 +75,22 @@ product on the Go side.
 | `FACE_DET_SIZE` | `640` | detector input square (px) |
 | `FACE_DET_THRESH` | `0.5` | detector score threshold |
 | `FACE_PROVIDER` | `cpu` | `cpu` or `openvino` (Intel CPU speedup; needs the `openvino` extra) |
+| `FACE_THREADS` | (all) | best-effort cap on OpenCV/BLAS threads |
 | `INSIGHTFACE_HOME` | `~/.insightface` | model cache dir |
+
+## Limiting CPU
+
+Inference uses all CPU cores by default (onnxruntime parallelises each detection
++ embedding across the machine), so a scan can saturate the host. The reliable
+cap is a **container CPU quota**, which also bounds onnxruntime's thread pool:
+
+```bash
+docker run --cpus=2 -p 8077:8077 kenko-face-service   # or `cpus: "2"` in compose
+```
+
+You can also reduce total work from the NVR's face settings (lower **sample fps**
+/ **max frames per recording**), and co-locate the sidecar with the NVR so the
+sampled frames it receives never leave the host/LAN.
 
 ## Tests
 

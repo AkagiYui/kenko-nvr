@@ -14,6 +14,11 @@ services:
     environment:
       FACE_PROVIDER: cpu
       # FACE_MODEL_PACK: buffalo_l   # or antelopev2 for higher accuracy
+      # FACE_THREADS: "2"            # best-effort cap on OpenCV/BLAS threads
+    # Cap CPU so a scan doesn't saturate the host. This is the hard limit and
+    # also bounds onnxruntime's intra-op pool. Adjust to the cores you want to
+    # give it; remove for unlimited.
+    cpus: "2"
     restart: unless-stopped
 
   # Intel CPU acceleration via the OpenVINO execution provider. Same models,
@@ -29,4 +34,5 @@ services:
       - "8077:8077"
     environment:
       FACE_PROVIDER: openvino
+    cpus: "2"
     restart: unless-stopped

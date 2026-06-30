@@ -17,6 +17,8 @@ Environment:
   FACE_DET_THRESH   Detector score threshold (default: 0.5).
   FACE_PROVIDER     onnxruntime execution provider: "cpu" (default) or
                     "openvino" (needs the openvino extra; Intel CPU speedup).
+  FACE_THREADS      Best-effort cap on internal threads (OpenCV + BLAS). The
+                    hard CPU cap in production is a container quota (--cpus).
   INSIGHTFACE_HOME  Where model packs are cached (default: ~/.insightface).
 """
 
@@ -26,6 +28,21 @@ import base64
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
+
+# Thread limiting (best-effort): set before importing cv2/numpy so their thread
+# pools honour it. The authoritative CPU cap in production is a container quota
+# (docker --cpus / compose cpus), which bounds onnxruntime's intra-op pool too;
+# FACE_THREADS additionally bounds OpenCV and the numpy/BLAS backends here.
+_FACE_THREADS = os.environ.get("FACE_THREADS", "").strip()
+if _FACE_THREADS and _FACE_THREADS != "0":
+    for _var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+    ):
+        os.environ.setdefault(_var, _FACE_THREADS)
 
 import cv2
 import numpy as np
@@ -38,6 +55,12 @@ MODEL_PACK = os.environ.get("FACE_MODEL_PACK", "buffalo_l")
 DET_SIZE = int(os.environ.get("FACE_DET_SIZE", "640"))
 DET_THRESH = float(os.environ.get("FACE_DET_THRESH", "0.5"))
 PROVIDER = os.environ.get("FACE_PROVIDER", "cpu").lower()
+
+if _FACE_THREADS and _FACE_THREADS != "0":
+    try:
+        cv2.setNumThreads(int(_FACE_THREADS))
+    except Exception:
+        pass
 
 _state: dict = {}
 
@@ -100,6 +123,7 @@ def healthz():
         "provider": _providers()[0],
         "det_size": DET_SIZE,
         "det_thresh": DET_THRESH,
+        "threads": _FACE_THREADS or "all",
     }
 
 
