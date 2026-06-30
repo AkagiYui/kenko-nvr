@@ -75,6 +75,9 @@ export interface Recording {
   // preserved on S3; it still plays (streamed back through the NVR) and is shown
   // with a cloud-only indicator.
   localRemoved?: boolean;
+  // encrypted is true when the S3 object is client-side encrypted (decrypted
+  // transparently on playback/download).
+  encrypted?: boolean;
   complete?: boolean;
 }
 
@@ -149,6 +152,10 @@ export interface S3Config {
   proxyURL: string;
   useSSL: boolean;
   deleteLocalAfterUpload: boolean;
+  // Client-side encryption: recordings are encrypted before upload and decrypted
+  // transparently on playback. encryptionKey is write-only (blank means unchanged).
+  encryptionEnabled: boolean;
+  encryptionKey: string;
 }
 
 export interface EmailConfig {

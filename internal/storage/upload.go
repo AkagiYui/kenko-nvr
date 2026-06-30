@@ -13,7 +13,7 @@ import (
 // UploadStore is the subset of the recording store the upload worker uses.
 type UploadStore interface {
 	PendingUploads(limit int) ([]database.Recording, error)
-	MarkUploaded(id, s3Key string) error
+	MarkUploaded(id, s3Key string, encrypted bool) error
 	// MarkLocalRemoved keeps the row but flags the local file as deleted, used
 	// after deleting the local copy of an uploaded recording.
 	MarkLocalRemoved(id string) error
@@ -75,13 +75,13 @@ func (w *UploadWorker) runOnce(ctx context.Context) {
 		if _, err := os.Stat(localPath); err != nil {
 			// File gone (deleted by retention); mark it handled so we stop
 			// retrying a missing file.
-			_ = w.Store.MarkUploaded(rec.ID, "")
+			_ = w.Store.MarkUploaded(rec.ID, "", false)
 			continue
 		}
 
 		key := uploader.Key(rec.Path)
 		uctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-		err := uploader.Upload(uctx, localPath, key)
+		encrypted, err := uploader.Upload(uctx, localPath, key)
 		cancel()
 		if err != nil {
 			if w.Log != nil {
@@ -90,7 +90,7 @@ func (w *UploadWorker) runOnce(ctx context.Context) {
 			continue // retry next tick
 		}
 
-		if err := w.Store.MarkUploaded(rec.ID, key); err != nil && w.Log != nil {
+		if err := w.Store.MarkUploaded(rec.ID, key, encrypted); err != nil && w.Log != nil {
 			w.Log.Error("marking uploaded", "err", err)
 		}
 		if w.Log != nil {

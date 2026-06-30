@@ -59,97 +59,121 @@ func TestRecordingS3PlaybackIntegration(t *testing.T) {
 		bucket = buckets[0].Name
 	}
 
-	cfg := database.S3Config{
-		Enabled:   true,
-		Endpoint:  host,
-		Bucket:    bucket,
-		AccessKey: access,
-		SecretKey: secret,
-		UseSSL:    useSSL,
-		KeyPrefix: "kenko-itest",
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// Upload a clip to S3 (no local file kept).
-	up, err := storage.NewUploader(cfg)
+	salt, err := storage.NewSalt()
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := bytes.Repeat([]byte("KENKO-CLIP-"), 4096) // ~44 KB
-	tmp := filepath.Join(t.TempDir(), "src.mp4")
-	if err := os.WriteFile(tmp, body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	relPath := "cam-itest/2026-06-30/playback.mp4"
-	key := up.Key(relPath)
-	if err := up.Upload(ctx, tmp, key); err != nil {
-		t.Fatalf("Upload: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = raw.RemoveObject(context.Background(), bucket, key, minio.RemoveObjectOptions{})
-	})
 
-	// Server backed by a real DB whose S3 settings point at the live bucket; the
-	// recordings dir is empty, so playback must fall back to S3.
-	db, err := database.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := db.Settings.SetS3(cfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Cameras.Create(database.Camera{ID: "c", Name: "c", SourceType: database.SourceRTSP}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Recordings.Create(database.Recording{
-		ID: "r1", CameraID: "c", Path: relPath, Complete: true,
-		Uploaded: true, S3Key: key, LocalRemoved: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range []struct {
+		name      string
+		encrypted bool
+	}{
+		{"plaintext", false},
+		{"encrypted", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := database.S3Config{
+				Enabled:   true,
+				Endpoint:  host,
+				Bucket:    bucket,
+				AccessKey: access,
+				SecretKey: secret,
+				UseSSL:    useSSL,
+				KeyPrefix: "kenko-itest",
+			}
+			if tc.encrypted {
+				cfg.EncryptionEnabled = true
+				cfg.EncryptionKey = "integration-passphrase"
+				cfg.EncryptionSalt = salt
+			}
 
-	s := &Server{
-		cfg:     config.Config{Storage: config.StorageConfig{RecordingsDir: t.TempDir()}},
-		db:      db,
-		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		archive: s3Archive{settings: db.Settings},
-	}
+			// Upload a clip to S3 (no local file kept).
+			up, err := storage.NewUploader(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := bytes.Repeat([]byte("KENKO-CLIP-"), 4096) // ~44 KB
+			tmp := filepath.Join(t.TempDir(), "src.mp4")
+			if err := os.WriteFile(tmp, body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			relPath := "cam-itest/2026-06-30/playback-" + tc.name + ".mp4"
+			key := up.Key(relPath)
+			gotEnc, err := up.Upload(ctx, tmp, key)
+			if err != nil {
+				t.Fatalf("Upload: %v", err)
+			}
+			if gotEnc != tc.encrypted {
+				t.Fatalf("Upload encrypted = %v, want %v", gotEnc, tc.encrypted)
+			}
+			t.Cleanup(func() {
+				_ = raw.RemoveObject(context.Background(), bucket, key, minio.RemoveObjectOptions{})
+			})
 
-	get := func(rangeHdr string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodGet, "/api/recordings/r1/file", nil)
-		if rangeHdr != "" {
-			r.Header.Set("Range", rangeHdr)
-		}
-		rc := chi.NewRouteContext()
-		rc.URLParams.Add("id", "r1")
-		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rc))
-		rr := httptest.NewRecorder()
-		s.handleRecordingFile(rr, r)
-		return rr
-	}
+			// Server backed by a real DB whose S3 settings point at the live
+			// bucket; the recordings dir is empty, so playback must fall back to S3.
+			db, err := database.Open(filepath.Join(t.TempDir(), "t.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Close() })
+			if err := db.Settings.SetS3(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Cameras.Create(database.Camera{ID: "c", Name: "c", SourceType: database.SourceRTSP}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Recordings.Create(database.Recording{
+				ID: "r1", CameraID: "c", Path: relPath, Complete: true,
+				Uploaded: true, S3Key: key, LocalRemoved: true, Encrypted: tc.encrypted,
+			}); err != nil {
+				t.Fatal(err)
+			}
 
-	// Full playback.
-	rr := get("")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("full GET status = %d", rr.Code)
-	}
-	if !bytes.Equal(rr.Body.Bytes(), body) {
-		t.Errorf("full body mismatch: got %d bytes, want %d", rr.Body.Len(), len(body))
-	}
-	if ct := rr.Header().Get("Content-Type"); ct != "video/mp4" {
-		t.Errorf("Content-Type = %q", ct)
-	}
+			s := &Server{
+				cfg:     config.Config{Storage: config.StorageConfig{RecordingsDir: t.TempDir()}},
+				db:      db,
+				log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+				archive: s3Archive{settings: db.Settings},
+			}
 
-	// Ranged playback (scrubbing).
-	rr = get("bytes=10-19")
-	if rr.Code != http.StatusPartialContent {
-		t.Fatalf("ranged GET status = %d, want 206", rr.Code)
+			get := func(rangeHdr string) *httptest.ResponseRecorder {
+				r := httptest.NewRequest(http.MethodGet, "/api/recordings/r1/file", nil)
+				if rangeHdr != "" {
+					r.Header.Set("Range", rangeHdr)
+				}
+				rc := chi.NewRouteContext()
+				rc.URLParams.Add("id", "r1")
+				r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rc))
+				rr := httptest.NewRecorder()
+				s.handleRecordingFile(rr, r)
+				return rr
+			}
+
+			// Full playback returns the decrypted plaintext.
+			rr := get("")
+			if rr.Code != http.StatusOK {
+				t.Fatalf("full GET status = %d", rr.Code)
+			}
+			if !bytes.Equal(rr.Body.Bytes(), body) {
+				t.Errorf("full body mismatch: got %d bytes, want %d", rr.Body.Len(), len(body))
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "video/mp4" {
+				t.Errorf("Content-Type = %q", ct)
+			}
+
+			// Ranged playback (scrubbing) decrypts only the requested span.
+			rr = get("bytes=10-19")
+			if rr.Code != http.StatusPartialContent {
+				t.Fatalf("ranged GET status = %d, want 206", rr.Code)
+			}
+			if got := rr.Body.Bytes(); !bytes.Equal(got, body[10:20]) {
+				t.Errorf("ranged body = %q, want %q", got, body[10:20])
+			}
+			t.Logf("end-to-end %s playback OK: %d bytes full, 206 range OK", tc.name, len(body))
+		})
 	}
-	if got := rr.Body.Bytes(); !bytes.Equal(got, body[10:20]) {
-		t.Errorf("ranged body = %q, want %q", got, body[10:20])
-	}
-	t.Logf("end-to-end S3 playback OK: %d bytes full, 206 range OK", len(body))
 }

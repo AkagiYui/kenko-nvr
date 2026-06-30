@@ -27,11 +27,11 @@ func (s *RecordingStore) Create(r Recording) error {
 		r.CreatedAt = MS(time.Now())
 	}
 	_, err := s.db.Exec(`INSERT INTO recordings (id, camera_id, path, start_time, end_time,
-		duration_ms, size_bytes, complete, uploaded, s3_key, local_removed, created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		duration_ms, size_bytes, complete, uploaded, s3_key, local_removed, encrypted, created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.CameraID, r.Path, timeToMS(r.StartTime.Time), timeToMS(r.EndTime.Time),
 		r.DurationMS, r.SizeBytes, boolToInt(r.Complete), boolToInt(r.Uploaded),
-		r.S3Key, boolToInt(r.LocalRemoved), timeToMS(r.CreatedAt.Time))
+		r.S3Key, boolToInt(r.LocalRemoved), boolToInt(r.Encrypted), timeToMS(r.CreatedAt.Time))
 	return err
 }
 
@@ -42,9 +42,11 @@ func (s *RecordingStore) Finalize(id string, endTime time.Time, durationMS, size
 	return err
 }
 
-// MarkUploaded records a successful S3 upload.
-func (s *RecordingStore) MarkUploaded(id, s3Key string) error {
-	_, err := s.db.Exec(`UPDATE recordings SET uploaded=1, s3_key=? WHERE id=?`, s3Key, id)
+// MarkUploaded records a successful S3 upload, including whether the stored
+// object is client-side encrypted.
+func (s *RecordingStore) MarkUploaded(id, s3Key string, encrypted bool) error {
+	_, err := s.db.Exec(`UPDATE recordings SET uploaded=1, s3_key=?, encrypted=? WHERE id=?`,
+		s3Key, boolToInt(encrypted), id)
 	return err
 }
 
@@ -73,7 +75,7 @@ func (s *RecordingStore) Delete(id string) error {
 }
 
 const recordingSelect = `SELECT id, camera_id, path, start_time, end_time, duration_ms,
-	size_bytes, complete, uploaded, s3_key, local_removed, created_at FROM recordings`
+	size_bytes, complete, uploaded, s3_key, local_removed, encrypted, created_at FROM recordings`
 
 // List returns recordings matching the filter, newest first.
 func (s *RecordingStore) List(f RecordingFilter) ([]Recording, error) {
@@ -213,9 +215,9 @@ func (s *RecordingStore) TotalSize() (int64, error) {
 func scanRecording(sc scanner) (Recording, error) {
 	var r Recording
 	var startMS, endMS, createdMS int64
-	var complete, uploaded, localRemoved int
+	var complete, uploaded, localRemoved, encrypted int
 	err := sc.Scan(&r.ID, &r.CameraID, &r.Path, &startMS, &endMS, &r.DurationMS,
-		&r.SizeBytes, &complete, &uploaded, &r.S3Key, &localRemoved, &createdMS)
+		&r.SizeBytes, &complete, &uploaded, &r.S3Key, &localRemoved, &encrypted, &createdMS)
 	if err != nil {
 		return Recording{}, err
 	}
@@ -225,5 +227,6 @@ func scanRecording(sc scanner) (Recording, error) {
 	r.Complete = complete != 0
 	r.Uploaded = uploaded != 0
 	r.LocalRemoved = localRemoved != 0
+	r.Encrypted = encrypted != 0
 	return r, nil
 }

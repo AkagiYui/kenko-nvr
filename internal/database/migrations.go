@@ -93,6 +93,11 @@ var migrations = []string{
 	// stays discoverable; it is excluded from local-disk size accounting and from
 	// the retention worker's deletion candidates.
 	`ALTER TABLE recordings ADD COLUMN local_removed INTEGER NOT NULL DEFAULT 0`,
+
+	// --- v13: client-side encrypted S3 objects ------------------------------
+	// encrypted marks a recording whose S3 object is client-side encrypted and
+	// must be decrypted on download/playback.
+	`ALTER TABLE recordings ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0`,
 }
 
 func (d *DB) migrate() error {

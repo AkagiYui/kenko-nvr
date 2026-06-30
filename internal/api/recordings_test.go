@@ -30,7 +30,7 @@ type fakeArchive struct {
 	err  error
 }
 
-func (f fakeArchive) Open(_ context.Context, key string) (*storage.Object, error) {
+func (f fakeArchive) Open(_ context.Context, key string, _ bool) (*storage.Object, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

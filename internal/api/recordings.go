@@ -17,7 +17,7 @@ import (
 
 // recordingArchive opens an archived recording from object storage for playback.
 type recordingArchive interface {
-	Open(ctx context.Context, key string) (*storage.Object, error)
+	Open(ctx context.Context, key string, encrypted bool) (*storage.Object, error)
 }
 
 // errS3Disabled is returned by the archive when S3 is not configured/enabled, so
@@ -29,7 +29,7 @@ var errS3Disabled = errors.New("s3 storage disabled")
 // restart.
 type s3Archive struct{ settings *database.SettingsStore }
 
-func (a s3Archive) Open(ctx context.Context, key string) (*storage.Object, error) {
+func (a s3Archive) Open(ctx context.Context, key string, encrypted bool) (*storage.Object, error) {
 	cfg, err := a.settings.S3()
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func (a s3Archive) Open(ctx context.Context, key string) (*storage.Object, error
 	if err != nil {
 		return nil, err
 	}
-	return up.Open(ctx, key)
+	return up.Open(ctx, key, encrypted)
 }
 
 func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +145,7 @@ func (s *Server) serveRecordingFromS3(w http.ResponseWriter, r *http.Request, re
 	if s.archive == nil || !rec.Uploaded || rec.S3Key == "" {
 		return false
 	}
-	obj, err := s.archive.Open(r.Context(), rec.S3Key)
+	obj, err := s.archive.Open(r.Context(), rec.S3Key, rec.Encrypted)
 	if err != nil {
 		if !errors.Is(err, errS3Disabled) {
 			s.log.Error("s3 playback: open object failed", "key", rec.S3Key, "err", err)

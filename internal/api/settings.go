@@ -44,7 +44,8 @@ func (s *Server) handleGetS3(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.SecretKey = "" // never expose the secret
+	c.SecretKey = ""     // never expose the secret
+	c.EncryptionKey = "" // never expose the encryption passphrase
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -58,11 +59,27 @@ func (s *Server) handleSetS3(w http.ResponseWriter, r *http.Request) {
 	if c.SecretKey == "" {
 		c.SecretKey = existing.SecretKey // preserve when left blank
 	}
+	if c.EncryptionKey == "" {
+		c.EncryptionKey = existing.EncryptionKey // preserve when left blank
+	}
+	// Keep a stable per-install KDF salt: reuse the existing one, or mint one the
+	// first time encryption is enabled. The salt is not secret but must not change
+	// once recordings have been encrypted with it.
+	c.EncryptionSalt = existing.EncryptionSalt
+	if c.EncryptionEnabled && c.EncryptionSalt == "" {
+		salt, err := storage.NewSalt()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.EncryptionSalt = salt
+	}
 	if err := s.db.Settings.SetS3(c); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.SecretKey = ""
+	c.EncryptionKey = ""
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -75,6 +92,14 @@ func (s *Server) handleTestS3(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.SecretKey == "" {
 		c.SecretKey = existing.SecretKey
+	}
+	// The connectivity test does not need encryption; preserve the saved key/salt
+	// so key derivation in NewUploader does not fail on a blanked passphrase.
+	if c.EncryptionKey == "" {
+		c.EncryptionKey = existing.EncryptionKey
+	}
+	if c.EncryptionSalt == "" {
+		c.EncryptionSalt = existing.EncryptionSalt
 	}
 	uploader, err := storage.NewUploader(c)
 	if err != nil {

@@ -107,7 +107,7 @@ func TestRecordingLifecycle(t *testing.T) {
 	if len(pend) != 1 {
 		t.Fatalf("expected 1 pending upload, got %d", len(pend))
 	}
-	if err := db.Recordings.MarkUploaded("r1", "bucket/key.mp4"); err != nil {
+	if err := db.Recordings.MarkUploaded("r1", "bucket/key.mp4", false); err != nil {
 		t.Fatal(err)
 	}
 	if pend, _ := db.Recordings.PendingUploads(10); len(pend) != 0 {

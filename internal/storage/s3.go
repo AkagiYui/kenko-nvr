@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -18,11 +19,13 @@ import (
 	"github.com/AkagiYui/kenko-nvr/internal/database"
 )
 
-// Uploader uploads files to an S3 bucket.
+// Uploader uploads files to an S3 bucket. When cipher is non-nil, objects are
+// client-side encrypted on upload and decrypted on Open.
 type Uploader struct {
 	client    *minio.Client
 	bucket    string
 	keyPrefix string
+	cipher    *Cipher // nil when encryption is disabled
 }
 
 // NewUploader builds an S3 uploader from config. When cfg.ProxyURL is set, all
@@ -63,10 +66,22 @@ func NewUploader(cfg database.S3Config) (*Uploader, error) {
 		return nil, fmt.Errorf("creating s3 client: %w", err)
 	}
 
+	var c *Cipher
+	if cfg.EncryptionEnabled {
+		key, err := DeriveKey(cfg.EncryptionKey, cfg.EncryptionSalt)
+		if err != nil {
+			return nil, fmt.Errorf("encryption key: %w", err)
+		}
+		if c, err = NewCipher(key); err != nil {
+			return nil, err
+		}
+	}
+
 	return &Uploader{
 		client:    client,
 		bucket:    cfg.Bucket,
 		keyPrefix: strings.Trim(cfg.KeyPrefix, "/"),
+		cipher:    c,
 	}, nil
 }
 
@@ -79,15 +94,41 @@ func (u *Uploader) Key(relPath string) string {
 	return u.keyPrefix + "/" + relPath
 }
 
-// Upload uploads localPath to the bucket under the given key.
-func (u *Uploader) Upload(ctx context.Context, localPath, key string) error {
-	_, err := u.client.FPutObject(ctx, u.bucket, key, localPath, minio.PutObjectOptions{
-		ContentType: "video/mp4",
-	})
-	if err != nil {
-		return fmt.Errorf("uploading %q: %w", key, err)
+// Upload uploads localPath to the bucket under the given key. When encryption is
+// enabled the object is encrypted client-side first. It reports whether the
+// stored object is encrypted so the caller can record it for playback.
+func (u *Uploader) Upload(ctx context.Context, localPath, key string) (encrypted bool, err error) {
+	if u.cipher == nil {
+		_, err := u.client.FPutObject(ctx, u.bucket, key, localPath, minio.PutObjectOptions{
+			ContentType: "video/mp4",
+		})
+		if err != nil {
+			return false, fmt.Errorf("uploading %q: %w", key, err)
+		}
+		return false, nil
 	}
-	return nil
+
+	f, err := os.Open(localPath)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	enc, err := u.cipher.EncryptReader(f)
+	if err != nil {
+		return false, err
+	}
+	// CTR is length-preserving; the object adds only the fixed encryption header.
+	objSize := EncryptedSize(info.Size())
+	if _, err := u.client.PutObject(ctx, u.bucket, key, enc, objSize, minio.PutObjectOptions{
+		ContentType: "application/octet-stream",
+	}); err != nil {
+		return false, fmt.Errorf("uploading encrypted %q: %w", key, err)
+	}
+	return true, nil
 }
 
 // Object is a readable, seekable handle to an S3 object plus its size and
@@ -103,11 +144,22 @@ type Object struct {
 // Close releases the underlying object handle.
 func (o *Object) Close() error { return o.Body.Close() }
 
+// readSeekCloser adapts a decrypting ReadSeeker plus the underlying object's
+// Closer into one io.ReadSeekCloser.
+type readSeekCloser struct {
+	io.ReadSeeker
+	closer io.Closer
+}
+
+func (r readSeekCloser) Close() error { return r.closer.Close() }
+
 // Open returns a handle to the object at key for streaming back to a client.
 // This is the read side of Upload: it lets recordings that were uploaded and
 // then deleted locally be played by proxying them through the NVR, so clients
-// with no direct internet/S3 access can still watch archived footage.
-func (u *Uploader) Open(ctx context.Context, key string) (*Object, error) {
+// with no direct internet/S3 access can still watch archived footage. When
+// encrypted is true the object is decrypted transparently and Size is the
+// plaintext size; the returned Body stays seekable so range/scrub still works.
+func (u *Uploader) Open(ctx context.Context, key string, encrypted bool) (*Object, error) {
 	obj, err := u.client.GetObject(ctx, u.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get object %q: %w", key, err)
@@ -117,7 +169,19 @@ func (u *Uploader) Open(ctx context.Context, key string) (*Object, error) {
 		_ = obj.Close()
 		return nil, fmt.Errorf("stat object %q: %w", key, err)
 	}
-	return &Object{Body: obj, Size: info.Size, ModTime: info.LastModified}, nil
+	if !encrypted {
+		return &Object{Body: obj, Size: info.Size, ModTime: info.LastModified}, nil
+	}
+	if u.cipher == nil {
+		_ = obj.Close()
+		return nil, fmt.Errorf("object %q is encrypted but encryption is not configured", key)
+	}
+	dec, plainSize, err := u.cipher.DecryptingReadSeeker(obj, info.Size)
+	if err != nil {
+		_ = obj.Close()
+		return nil, fmt.Errorf("decrypting %q: %w", key, err)
+	}
+	return &Object{Body: readSeekCloser{ReadSeeker: dec, closer: obj}, Size: plainSize, ModTime: info.LastModified}, nil
 }
 
 // CheckBucket verifies the bucket is reachable and exists. Useful for the

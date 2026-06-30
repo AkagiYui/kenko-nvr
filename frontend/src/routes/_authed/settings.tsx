@@ -515,6 +515,8 @@ function S3Form(props: { initial: S3Config }) {
   const [proxyURL, setProxyURL] = createSignal(c.proxyURL ?? "");
   const [useSSL, setUseSSL] = createSignal(c.useSSL);
   const [deleteLocal, setDeleteLocal] = createSignal(c.deleteLocalAfterUpload);
+  const [encEnabled, setEncEnabled] = createSignal(c.encryptionEnabled);
+  const [encKey, setEncKey] = createSignal("");
 
   const collect = (): S3Config => ({
     enabled: enabled(),
@@ -527,6 +529,8 @@ function S3Form(props: { initial: S3Config }) {
     proxyURL: proxyURL(),
     useSSL: useSSL(),
     deleteLocalAfterUpload: deleteLocal(),
+    encryptionEnabled: encEnabled(),
+    encryptionKey: encKey(),
   });
 
   const save = async () => {
@@ -580,6 +584,27 @@ function S3Form(props: { initial: S3Config }) {
       <div class="flex gap-6 flex-wrap">
         <Check checked={useSSL()} onChange={setUseSSL} label="使用 HTTPS" />
         <Check checked={deleteLocal()} onChange={setDeleteLocal} label="上传后删除本地文件" />
+      </div>
+      <div class="border-t border-base-300 pt-3 mt-1">
+        <Check
+          checked={encEnabled()}
+          onChange={setEncEnabled}
+          label="客户端加密（AES-256）"
+        />
+        <p class="text-xs text-base-content/60 mt-1 mb-2">
+          录像上传前在本地加密，回放/下载时自动解密，存储服务商只能看到密文。请妥善保管口令：修改或丢失口令将无法解密已上传的录像。
+        </p>
+        <Show when={encEnabled()}>
+          <Labeled label="加密口令" hint="用于派生 AES 密钥；留空表示不修改">
+            <input
+              type="password"
+              class="input input-bordered w-full"
+              placeholder="（留空表示不修改）"
+              value={encKey()}
+              onInput={(e) => setEncKey(e.currentTarget.value)}
+            />
+          </Labeled>
+        </Show>
       </div>
       <div class="flex gap-2.5">
         <button class="btn btn-primary" onClick={() => void save()}>保存</button>
