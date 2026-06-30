@@ -142,6 +142,12 @@ func (s *FaceTrackStore) UpdatePerson(id, personID string) error {
 	return err
 }
 
+// ReassignPerson moves every track from one person to another (used by merge).
+func (s *FaceTrackStore) ReassignPerson(fromPersonID, toPersonID string) error {
+	_, err := s.db.Exec(`UPDATE face_tracks SET person_id=? WHERE person_id=?`, toPersonID, fromPersonID)
+	return err
+}
+
 // SetConfirmed marks a track's assignment as operator-locked.
 func (s *FaceTrackStore) SetConfirmed(id string, confirmed bool) error {
 	_, err := s.db.Exec(`UPDATE face_tracks SET confirmed = ? WHERE id = ?`, boolToInt(confirmed), id)

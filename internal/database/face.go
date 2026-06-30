@@ -75,6 +75,26 @@ type Face struct {
 	CreatedAt EpochMS `json:"createdAt"`
 }
 
+// LinkKind is the type of a clustering constraint.
+type LinkKind string
+
+const (
+	// LinkMust forces two tracks into the same identity.
+	LinkMust LinkKind = "must"
+	// LinkCannot keeps two tracks in different identities.
+	LinkCannot LinkKind = "cannot"
+)
+
+// PersonLink is an operator-supplied constraint between two tracks that
+// re-clustering must honour.
+type PersonLink struct {
+	ID        string   `json:"id"`
+	Kind      LinkKind `json:"kind"`
+	ATrack    string   `json:"aTrack"`
+	BTrack    string   `json:"bTrack"`
+	CreatedAt EpochMS  `json:"createdAt"`
+}
+
 // FaceJobState is the lifecycle state of a face-analysis job.
 type FaceJobState string
 

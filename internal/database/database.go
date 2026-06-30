@@ -15,17 +15,18 @@ import (
 
 // DB wraps the SQL connection and exposes the typed stores.
 type DB struct {
-	sql        *sql.DB
-	Cameras    *CameraStore
-	Recordings *RecordingStore
-	Settings   *SettingsStore
-	Users      *UserStore
-	Events     *EventStore
-	Push       *PushStore
-	Persons    *PersonStore
-	Faces      *FaceStore
-	FaceTracks *FaceTrackStore
-	FaceJobs   *FaceJobStore
+	sql         *sql.DB
+	Cameras     *CameraStore
+	Recordings  *RecordingStore
+	Settings    *SettingsStore
+	Users       *UserStore
+	Events      *EventStore
+	Push        *PushStore
+	Persons     *PersonStore
+	Faces       *FaceStore
+	FaceTracks  *FaceTrackStore
+	FaceJobs    *FaceJobStore
+	PersonLinks *PersonLinkStore
 }
 
 // Open opens (creating if needed) the SQLite database at path, applies pragmas,
@@ -72,6 +73,7 @@ func Open(path string) (*DB, error) {
 	db.Faces = &FaceStore{db: sqlDB}
 	db.FaceTracks = &FaceTrackStore{db: sqlDB}
 	db.FaceJobs = &FaceJobStore{db: sqlDB}
+	db.PersonLinks = &PersonLinkStore{db: sqlDB}
 	return db, nil
 }
 

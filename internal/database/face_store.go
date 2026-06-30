@@ -194,6 +194,25 @@ func (s *FaceStore) SetIgnored(faceID string, ignored bool) error {
 	return err
 }
 
+// ReassignPerson moves every face from one person to another (used by merge).
+func (s *FaceStore) ReassignPerson(fromPersonID, toPersonID string) error {
+	_, err := s.db.Exec(`UPDATE faces SET person_id=? WHERE person_id=?`, toPersonID, fromPersonID)
+	return err
+}
+
+// RebuildExemplars recomputes a person's exemplar set from scratch: clear all
+// flags, then mark the top `keep` non-ignored faces by quality. Used after a
+// correction or re-cluster changes a person's membership.
+func (s *FaceStore) RebuildExemplars(personID string, keep int) error {
+	if _, err := s.db.Exec(`UPDATE faces SET is_exemplar=0 WHERE person_id=?`, personID); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE faces SET is_exemplar=1 WHERE id IN (
+		SELECT id FROM faces WHERE person_id=? AND ignored=0 ORDER BY quality DESC LIMIT ?
+	)`, personID, keep)
+	return err
+}
+
 // PruneExemplars keeps only the highest-quality `keep` exemplars for a person,
 // clearing the is_exemplar flag on the rest, so the gallery stays compact and
 // diverse-by-quality without growing unbounded.

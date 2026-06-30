@@ -141,6 +141,26 @@ func main() {
 	}
 	go faceWorker.Run(ctx, 5*time.Second)
 
+	// Periodic global re-clustering: cleans up the over-splitting incremental
+	// assignment leaves behind, honouring operator confirmations and links.
+	go func() {
+		clus := &face.Clusterer{DB: db, Log: log}
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if c, _ := db.Settings.Face(); c.Enabled {
+					if _, err := clus.Recluster(ctx, c); err != nil {
+						log.Warn("face: recluster failed", "err", err)
+					}
+				}
+			}
+		}
+	}()
+
 	// Management/API/HLS server (blocks until shutdown).
 	srv := api.New(cfg, db, mgr, notifier, log)
 	log.Info("kenko-nvr started",

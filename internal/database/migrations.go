@@ -185,6 +185,20 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_face_tracks_person ON face_tracks(person_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_face_tracks_recording ON face_tracks(recording_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_face_tracks_camera_ts ON face_tracks(camera_id, start_ts)`,
+
+	// --- v16: clustering constraints ----------------------------------------
+	// person_links records operator corrections as track-level constraints that
+	// re-clustering must honour: must = force two tracks into one identity,
+	// cannot = keep them apart.
+	`CREATE TABLE IF NOT EXISTS person_links (
+		id         TEXT PRIMARY KEY,
+		kind       TEXT NOT NULL,
+		a_track    TEXT NOT NULL DEFAULT '',
+		b_track    TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_person_links_a ON person_links(a_track)`,
+	`CREATE INDEX IF NOT EXISTS idx_person_links_b ON person_links(b_track)`,
 }
 
 func (d *DB) migrate() error {
