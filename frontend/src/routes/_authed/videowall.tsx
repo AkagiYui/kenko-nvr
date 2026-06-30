@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store";
 import { api } from "~/lib/api";
 import { subscribeStatus } from "~/lib/status";
 import { isPlaying, startPlayer, stopPlayer, type Overlay } from "~/lib/player";
+import { broadcasterMode } from "~/lib/broadcaster";
 import type { Camera, CameraStatus, VideoWallConfig } from "~/lib/types";
 
 export const Route = createFileRoute("/_authed/videowall")({
@@ -184,7 +185,14 @@ function WallTile(props: {
 
   return (
     <div class="relative bg-black rounded overflow-hidden aspect-video group">
-      <video ref={videoRef} class="w-full h-full object-contain bg-black" muted playsinline autoplay />
+      <video
+        ref={videoRef}
+        class="w-full h-full object-contain bg-black"
+        style={{ filter: broadcasterMode() ? "blur(30px)" : "none", transition: "filter 0.3s ease" }}
+        muted
+        playsinline
+        autoplay
+      />
 
       <Show when={!props.camera}>
         <div class="absolute inset-0 flex items-center justify-center p-2">

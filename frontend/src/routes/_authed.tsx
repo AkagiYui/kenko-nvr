@@ -4,6 +4,7 @@ import { Icon } from "@iconify-icon/solid";
 import { api, getRole, getUsername, isAdmin, isAuthed, logout } from "~/lib/api";
 import { getThemePref, setThemePref, type ThemePref } from "~/lib/theme";
 import { fmtRate } from "~/lib/format";
+import { broadcasterMode, setBroadcasterMode } from "~/lib/broadcaster";
 import type { Me, SystemStats } from "~/lib/types";
 
 export const Route = createFileRoute("/_authed")({
@@ -206,6 +207,21 @@ function AuthedLayout() {
               )}
             </For>
           </div>
+
+          {/* Broadcaster mode: blurs live feeds for screen-sharing / streaming. */}
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-1.5 text-[12px] text-base-content/60 select-none">
+              <Icon icon="lucide:eye-off" width="13" height="13" />
+              主播模式
+            </span>
+            <input
+              type="checkbox"
+              class="toggle toggle-xs toggle-primary"
+              checked={broadcasterMode()}
+              onChange={(e) => setBroadcasterMode(e.currentTarget.checked)}
+              aria-label="主播模式"
+            />
+          </label>
 
           {/* Logged-in user + logout. */}
           <div class="flex items-center justify-between gap-2">

@@ -5,6 +5,7 @@ import { isPlaying, startPlayer, stopPlayer, type LiveMode, type Overlay } from 
 import { startTalk, type TalkHandle } from "~/lib/talk";
 import { toast } from "./toast";
 import { PtzControls } from "./PtzControls";
+import { broadcasterMode } from "~/lib/broadcaster";
 
 const STATE_TEXT: Record<string, string> = {
   running: "在线",
@@ -124,7 +125,14 @@ export function LiveCard(props: { camera: Camera; status: () => CameraStatus }) 
       </div>
 
       <div class="relative bg-black aspect-video">
-        <video ref={videoRef} class="w-full h-full object-contain bg-black" muted playsinline autoplay />
+        <video
+          ref={videoRef}
+          class="w-full h-full object-contain bg-black"
+          style={{ filter: broadcasterMode() ? "blur(30px)" : "none", transition: "filter 0.3s ease" }}
+          muted
+          playsinline
+          autoplay
+        />
         <Show when={ovText() !== null}>
           <div
             class="absolute inset-0 flex items-center justify-center text-sm text-base-content/60 text-center p-4"
