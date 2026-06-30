@@ -28,6 +28,11 @@ COPY app ./app
 # Install the project and its dependencies into the system environment.
 RUN uv pip install --system .
 
+# Optional Intel CPU acceleration: install the OpenVINO execution provider when
+# built with --build-arg INSTALL_OPENVINO=1 (run with FACE_PROVIDER=openvino).
+ARG INSTALL_OPENVINO=0
+RUN if [ "$INSTALL_OPENVINO" = "1" ]; then uv pip install --system "onnxruntime-openvino>=1.17"; fi
+
 # Pre-fetch and cache the model pack into INSIGHTFACE_HOME so the container is
 # self-contained and starts without any download.
 RUN python -c "from app.main import _load; _load()"

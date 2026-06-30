@@ -1,0 +1,32 @@
+# Run the face sidecar with Docker Compose.
+#
+#   docker compose up -d                     # CPU (portable, default)
+#   docker compose --profile openvino up -d  # Intel CPU acceleration (OpenVINO)
+#
+# Both expose the same API on :8077; point the NVR's face SidecarURL at it.
+services:
+  face-service:
+    build:
+      context: .
+    image: kenko-face-service
+    ports:
+      - "8077:8077"
+    environment:
+      FACE_PROVIDER: cpu
+      # FACE_MODEL_PACK: buffalo_l   # or antelopev2 for higher accuracy
+    restart: unless-stopped
+
+  # Intel CPU acceleration via the OpenVINO execution provider. Same models,
+  # 2-4x throughput on Intel CPUs; still fully offline.
+  face-service-openvino:
+    profiles: ["openvino"]
+    build:
+      context: .
+      args:
+        INSTALL_OPENVINO: "1"
+    image: kenko-face-service-openvino
+    ports:
+      - "8077:8077"
+    environment:
+      FACE_PROVIDER: openvino
+    restart: unless-stopped

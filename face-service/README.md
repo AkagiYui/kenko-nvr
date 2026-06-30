@@ -29,6 +29,14 @@ docker run --rm -p 8077:8077 kenko-face-service
 curl localhost:8077/healthz
 ```
 
+Or with Compose (CPU by default; OpenVINO profile for Intel CPU acceleration):
+
+```bash
+cd face-service
+docker compose up -d                     # CPU
+docker compose --profile openvino up -d  # Intel CPU (OpenVINO, 2-4x)
+```
+
 ## Run (uv, local dev)
 
 ```bash

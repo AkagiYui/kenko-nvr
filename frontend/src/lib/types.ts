@@ -148,6 +148,8 @@ export interface FaceConfig {
   detThreshold: number;
   minQuality: number;
   motionGated: boolean;
+  realtime: boolean;
+  realtimeFps: number;
   matchThreshold: number;
   reviewThreshold: number;
 }

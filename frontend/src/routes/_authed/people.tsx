@@ -445,6 +445,25 @@ function FaceSettingsModal(props: { onClose: () => void; onSaved: () => void }) 
               onChange={(e) => patch({ motionGated: e.currentTarget.checked })}
             />
           </label>
+          <label class="flex items-center justify-between">
+            <span class="text-sm" title="在直播流上实时检测人脸并告警（身份归类仍由录像分析完成）">
+              实时人脸告警
+            </span>
+            <input
+              type="checkbox"
+              class="toggle toggle-primary"
+              checked={cfg()!.realtime}
+              onChange={(e) => patch({ realtime: e.currentTarget.checked })}
+            />
+          </label>
+          <Show when={cfg()!.realtime}>
+            <NumberField
+              label="实时采样帧率 (fps)"
+              value={cfg()!.realtimeFps}
+              step={0.5}
+              onChange={(v) => patch({ realtimeFps: v })}
+            />
+          </Show>
           <div class="flex justify-end gap-2 mt-2">
             <button class="btn btn-sm" onClick={props.onClose}>
               取消

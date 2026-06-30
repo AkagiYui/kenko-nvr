@@ -9,6 +9,7 @@ import (
 
 	"github.com/AkagiYui/kenko-nvr/internal/core"
 	"github.com/AkagiYui/kenko-nvr/internal/database"
+	"github.com/AkagiYui/kenko-nvr/internal/face"
 	"github.com/AkagiYui/kenko-nvr/internal/hls"
 	"github.com/AkagiYui/kenko-nvr/internal/motion"
 	"github.com/AkagiYui/kenko-nvr/internal/notify"
@@ -53,6 +54,44 @@ type camRuntime struct {
 	motionActive  bool
 	motionEndAt   time.Time
 	motionEventID string
+
+	// realtime face-presence event state, guarded by faceMu.
+	faceMu      sync.Mutex
+	faceEventID string
+}
+
+// onFaceStart records the start of a realtime face-presence event and notifies.
+func (rt *camRuntime) onFaceStart(t time.Time) {
+	id := uuid.NewString()
+	rt.faceMu.Lock()
+	rt.faceEventID = id
+	rt.faceMu.Unlock()
+
+	_ = rt.mgr.db.Events.Create(database.Event{
+		ID:        id,
+		CameraID:  rt.camera.ID,
+		Type:      database.EventFace,
+		StartTime: database.MS(t),
+	})
+	rt.mgr.notify(notify.Notification{
+		Kind:       "face",
+		CameraID:   rt.camera.ID,
+		CameraName: rt.camera.Name,
+		Title:      "检测到人脸 · " + rt.camera.Name,
+		Body:       "摄像头「" + rt.camera.Name + "」检测到人脸。",
+		Time:       t,
+	})
+}
+
+// onFaceEnd closes the current face-presence event.
+func (rt *camRuntime) onFaceEnd(t time.Time, score float64) {
+	rt.faceMu.Lock()
+	id := rt.faceEventID
+	rt.faceEventID = ""
+	rt.faceMu.Unlock()
+	if id != "" {
+		_ = rt.mgr.db.Events.Finalize(id, t, score)
+	}
 }
 
 // motionGate reports whether motion-triggered recording should be active at t:
@@ -320,6 +359,28 @@ func (rt *camRuntime) startConsumers(ctx context.Context, stream *core.Stream) {
 	} else if motionMode && !motion.Available() && rt.mgr.log != nil {
 		rt.mgr.log.Warn("motion record mode requested but ffmpeg not found; recording continuously",
 			"camera", rt.camera.ID)
+	}
+
+	// Realtime face alerts (global opt-in): sample the live stream and emit a
+	// "face" presence event + notification while a face is visible. Identity
+	// grouping is still done by the post-process pipeline.
+	if fc, _ := rt.mgr.db.Settings.Face(); fc.Enabled && fc.Realtime && fc.SidecarURL != "" &&
+		motion.Available() && stream.VideoTrack() != nil {
+		fd := &face.LiveDetector{
+			Source:       stream,
+			Client:       face.NewClient(fc.SidecarURL),
+			SampleFPS:    fc.RealtimeFPS,
+			MinFaceSize:  fc.MinFaceSize,
+			DetThreshold: fc.DetThreshold,
+			Log:          rt.mgr.log,
+			OnStart:      rt.onFaceStart,
+			OnEnd:        rt.onFaceEnd,
+		}
+		rt.wg.Add(1)
+		go func() {
+			defer rt.wg.Done()
+			_ = fd.Run(ctx)
+		}()
 	}
 
 	if rt.camera.Record {

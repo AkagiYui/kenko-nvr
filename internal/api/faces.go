@@ -199,6 +199,9 @@ func sanitizeFaceConfig(c database.FaceConfig) database.FaceConfig {
 	if c.ReviewThreshold <= 0 || c.ReviewThreshold > c.MatchThreshold {
 		c.ReviewThreshold = d.ReviewThreshold
 	}
+	if c.RealtimeFPS <= 0 || c.RealtimeFPS > 10 {
+		c.RealtimeFPS = d.RealtimeFPS
+	}
 	return c
 }
 

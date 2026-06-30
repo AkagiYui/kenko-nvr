@@ -146,6 +146,14 @@ type FaceConfig struct {
 	// recording when any exist (falling back to the whole file otherwise).
 	MotionGated bool `json:"motionGated"`
 
+	// Realtime turns on live-stream face-presence alerts (in addition to the
+	// post-process pipeline): each running camera samples its live stream and
+	// emits a "face" event + notification while a face is present. Identity
+	// grouping still happens in post-process.
+	Realtime bool `json:"realtime"`
+	// RealtimeFPS is how many frames per second the live detector samples.
+	RealtimeFPS float64 `json:"realtimeFps"`
+
 	// --- gallery thresholds (used from phase 2) ---
 	// MatchThreshold: cosine at/above which a track auto-joins an existing person.
 	MatchThreshold float64 `json:"matchThreshold"`
@@ -169,6 +177,8 @@ func DefaultFaceConfig() FaceConfig {
 		DetThreshold:    0.5,
 		MinQuality:      0,
 		MotionGated:     true,
+		Realtime:        false,
+		RealtimeFPS:     1,
 		MatchThreshold:  0.45,
 		ReviewThreshold: 0.30,
 	}

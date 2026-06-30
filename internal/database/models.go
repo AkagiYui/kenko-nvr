@@ -175,6 +175,8 @@ type EventType string
 const (
 	// EventMotion is a motion-detection event.
 	EventMotion EventType = "motion"
+	// EventFace is a realtime face-presence event (a face appeared on a camera).
+	EventFace EventType = "face"
 )
 
 // Event is a detected occurrence (currently motion) on a camera, used by the
